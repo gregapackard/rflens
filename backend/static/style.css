@@ -120,6 +120,10 @@ time,
   color: var(--cyan);
 }
 
+.tab[data-tab="overview"] {
+  display: none;
+}
+
 main {
   width: min(1500px, 100%);
   margin: 0 auto;

@@ -174,6 +174,12 @@ function adsbRange(event) {
   return Number.isFinite(range) ? range : null;
 }
 
+function adsbAltitude(event) {
+  const metadata = parseMetadata(event);
+  const altitude = Number(metadata.alt_baro ?? event.altitude);
+  return Number.isFinite(altitude) ? altitude : null;
+}
+
 function adsbRssi(event) {
   const metadata = parseMetadata(event);
   const rssi = Number(metadata.rssi);
@@ -576,12 +582,31 @@ function renderSystemCard(system, sources) {
   setMany(["dash-system-warnings", "overview-system-warnings"], warnings.length);
 }
 
+function renderHighlights({ adsb, aprs, captures, system }) {
+  const aircraft = uniqueAircraftEvents(adsb);
+  const ranges = aircraft.map(adsbRange).filter(Number.isFinite);
+  const altitudes = aircraft.map(adsbAltitude).filter(Number.isFinite);
+  const stations = uniqueBy(aprs, (event) => event.callsign);
+  const recentAprs = aprs.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
+  const latestCapture = captures.slice().sort((a, b) => timeMs(captureTime(b)) - timeMs(captureTime(a)))[0];
+
+  setText("highlight-adsb-range", ranges.length ? `${Math.max(...ranges).toFixed(1)} nmi` : "No data yet");
+  setText("highlight-adsb-altitude", altitudes.length ? `${Math.max(...altitudes).toLocaleString()} ft` : "No data yet");
+  setText("highlight-aprs-stations", aprs.length ? stations.length : "No data yet");
+  setText("highlight-aprs-recent", aprs.length ? `${recentAprs.length} packets` : "No data yet");
+  setText("highlight-sat-capture", latestCapture ? relTime(captureTime(latestCapture)) : "No data yet");
+  setText("highlight-sat-file", latestCapture?.image_path ? shortPath(latestCapture.image_path) : "No data yet");
+  setText("highlight-system-cpu", formatPercent(system?.cpu_percent));
+  setText("highlight-system-disk", formatPercent(system?.disk?.percent));
+}
+
 function renderOverview({ sources, adsb, aprs, captures, events, system }) {
   renderGlobalCard({ sources });
   renderAdsbCard(adsb);
   renderAprsCard(aprs);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
+  renderHighlights({ adsb, aprs, captures, system });
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
   setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);

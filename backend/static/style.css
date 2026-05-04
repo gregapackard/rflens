@@ -410,6 +410,38 @@ dd {
   border-top: 1px solid var(--line);
 }
 
+.highlights {
+  border-top: 1px solid var(--line);
+}
+
+.highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.highlight-card {
+  min-width: 0;
+  border: 1px solid rgba(37, 50, 65, 0.74);
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: rgba(8, 14, 20, 0.32);
+}
+
+.highlight-card h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+}
+
+.highlight-card dl {
+  gap: 0.5rem;
+}
+
+.highlight-card dl div {
+  padding-top: 0.5rem;
+}
+
 #tab-dashboard.active + #tab-overview .overview-events {
   margin-top: 0.1rem;
 }
@@ -599,6 +631,10 @@ tr.recent-row td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .highlight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
 }
 
 @media (max-width: 560px) {
@@ -617,6 +653,10 @@ tr.recent-row td {
   }
 
   .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .highlight-grid {
     grid-template-columns: 1fr;
   }
 }

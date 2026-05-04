@@ -380,7 +380,14 @@ function renderOverviewFeed(events, sources, targetId, limit = 20) {
       </div>
     `;
   }).join("");
-  setHtml(targetId, html || `<div class="feed-row"><strong>No non-routine events yet</strong></div>`);
+  setHtml(targetId, html || `
+    <div class="feed-row">
+      <time>normal</time>
+      <strong>All systems normal</strong>
+      <span>quiet</span>
+      <p>No significant RF events detected</p>
+    </div>
+  `);
   return filtered.length;
 }
 

@@ -332,6 +332,15 @@ dd {
   gap: 0.8rem;
 }
 
+#tab-dashboard .events-card,
+#tab-dashboard .feed-panel {
+  display: none;
+}
+
+#tab-dashboard .layout {
+  grid-template-columns: 1fr;
+}
+
 .mini-events {
   display: grid;
   gap: 0.45rem;

@@ -127,7 +127,7 @@ time,
 main {
   width: min(1500px, 100%);
   margin: 0 auto;
-  padding: clamp(1rem, 3vw, 2rem);
+  padding: clamp(1rem, 2.6vw, 1.75rem);
 }
 
 .tab-panel {
@@ -324,37 +324,63 @@ dd {
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
-  padding: 1rem;
+  gap: 1.15rem;
+  padding: 1.15rem;
 }
 
 .overview-card {
   min-width: 0;
   border: 1px solid rgba(37, 50, 65, 0.86);
   border-radius: 8px;
-  padding: 1rem;
+  padding: 1.05rem;
   background: rgba(8, 14, 20, 0.45);
 }
 
 .overview-card h3 {
-  margin: 0 0 0.8rem;
+  margin: 0 0 0.95rem;
   color: var(--text);
   font-size: 0.95rem;
+}
+
+#tab-dashboard.active + #tab-overview .overview-panel {
+  border-color: rgba(37, 50, 65, 0.95);
+}
+
+#tab-dashboard.active + #tab-overview .panel-head {
+  min-height: 3.6rem;
+  padding: 0 1.15rem;
+}
+
+#tab-dashboard.active + #tab-overview .overview-grid {
+  align-items: stretch;
+}
+
+#tab-dashboard.active + #tab-overview .overview-card {
+  display: grid;
+  align-content: start;
+}
+
+#tab-dashboard.active + #tab-overview dl {
+  gap: 0.75rem;
+}
+
+#tab-dashboard.active + #tab-overview dl div {
+  min-height: 1.75rem;
+  padding-top: 0.75rem;
+}
+
+#tab-dashboard.active + #tab-overview dt {
+  line-height: 1.25;
+}
+
+#tab-dashboard.active + #tab-overview dd {
+  line-height: 1.3;
 }
 
 .events-card {
   display: grid;
   align-content: start;
   gap: 0.8rem;
-}
-
-#tab-dashboard .events-card,
-#tab-dashboard .feed-panel {
-  display: none;
-}
-
-#tab-dashboard .layout {
-  grid-template-columns: 1fr;
 }
 
 .mini-events {
@@ -384,13 +410,17 @@ dd {
   border-top: 1px solid var(--line);
 }
 
+#tab-dashboard.active + #tab-overview .overview-events {
+  margin-top: 0.1rem;
+}
+
 .compact-head {
   min-height: 2.8rem;
 }
 
 .overview-actions {
   border-top: 1px solid var(--line);
-  padding: 1rem;
+  padding: 1.15rem;
 }
 
 .secondary-button {

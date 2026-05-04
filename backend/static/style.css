@@ -211,6 +211,10 @@ dd {
   overflow: hidden;
 }
 
+#tab-dashboard .overview-panel {
+  margin-bottom: 0;
+}
+
 #tab-adsb.active {
   margin: calc(clamp(1rem, 3vw, 2rem) * -1);
 }

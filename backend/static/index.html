@@ -17,6 +17,7 @@
 
     <nav class="tabs" aria-label="RF Lens views">
       <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
+      <button class="tab" type="button" data-tab="overview">RF Overview</button>
       <button class="tab" type="button" data-tab="adsb">ADS-B</button>
       <button class="tab" type="button" data-tab="events">Events</button>
       <button class="tab" type="button" data-tab="captures">Captures</button>
@@ -24,9 +25,150 @@
 
     <main>
       <section class="tab-panel active" id="tab-dashboard">
+        <section class="overview-grid dashboard-cards">
+          <section class="overview-card">
+            <h3>Global Status</h3>
+            <dl>
+              <div><dt>RF Lens</dt><dd id="dash-global-health">connecting</dd></div>
+              <div><dt>Station</dt><dd id="dash-global-station">-</dd></div>
+              <div><dt>Active sources</dt><dd id="dash-global-sources">-</dd></div>
+              <div><dt>Last refresh</dt><dd id="dash-global-refresh">-</dd></div>
+            </dl>
+          </section>
+          <section class="overview-card">
+            <h3>ADS-B</h3>
+            <dl>
+              <div><dt>Aircraft heard</dt><dd id="dash-adsb-total">No data yet</dd></div>
+              <div><dt>With position</dt><dd id="dash-adsb-positioned">No data yet</dd></div>
+              <div><dt>Without position</dt><dd id="dash-adsb-unpositioned">No data yet</dd></div>
+              <div><dt>Max range</dt><dd id="dash-adsb-range">No data yet</dd></div>
+              <div><dt>Highest</dt><dd id="dash-adsb-highest">No data yet</dd></div>
+              <div><dt>Closest</dt><dd id="dash-adsb-closest">No data yet</dd></div>
+              <div><dt>Best signal</dt><dd id="dash-adsb-rssi">No data yet</dd></div>
+              <div><dt>Last update</dt><dd id="dash-adsb-updated">No data yet</dd></div>
+            </dl>
+          </section>
+          <section class="overview-card">
+            <h3>APRS</h3>
+            <dl>
+              <div><dt>Stations heard</dt><dd id="dash-aprs-stations">No data yet</dd></div>
+              <div><dt>Packets</dt><dd id="dash-aprs-packets">No data yet</dd></div>
+              <div><dt>With position</dt><dd id="dash-aprs-positioned">No data yet</dd></div>
+              <div><dt>Last packet</dt><dd id="dash-aprs-updated">No data yet</dd></div>
+              <div><dt>Newest station</dt><dd id="dash-aprs-newest">No data yet</dd></div>
+              <div><dt>Last 10 min</dt><dd id="dash-aprs-recent">No data yet</dd></div>
+            </dl>
+          </section>
+          <section class="overview-card">
+            <h3>Satellite</h3>
+            <dl>
+              <div><dt>Captures</dt><dd id="dash-sat-captures">No data yet</dd></div>
+              <div><dt>Today</dt><dd id="dash-sat-today">No data yet</dd></div>
+              <div><dt>Last satellite</dt><dd id="dash-sat-name">No data yet</dd></div>
+              <div><dt>Last capture</dt><dd id="dash-sat-updated">No data yet</dd></div>
+              <div><dt>Status</dt><dd id="dash-sat-status">No data yet</dd></div>
+              <div><dt>Image</dt><dd id="dash-sat-image">No data yet</dd></div>
+            </dl>
+          </section>
+          <section class="overview-card">
+            <h3>System</h3>
+            <dl>
+              <div><dt>CPU</dt><dd id="dash-system-cpu">-</dd></div>
+              <div><dt>Memory</dt><dd id="dash-system-memory">-</dd></div>
+              <div><dt>Disk</dt><dd id="dash-system-disk">-</dd></div>
+              <div><dt>APRS</dt><dd id="dash-system-aprs">-</dd></div>
+              <div><dt>ADS-B</dt><dd id="dash-system-adsb">-</dd></div>
+              <div><dt>Satellite</dt><dd id="dash-system-satellite">-</dd></div>
+              <div><dt>Warnings</dt><dd id="dash-system-warnings">0</dd></div>
+            </dl>
+          </section>
+          <section class="overview-card events-card">
+            <h3>Events</h3>
+            <dl>
+              <div><dt>Last 10 min</dt><dd id="dash-events-recent">No data yet</dd></div>
+              <div><dt>By event</dt><dd id="dash-events-types">No data yet</dd></div>
+              <div><dt>By source</dt><dd id="dash-events-sources">No data yet</dd></div>
+            </dl>
+            <div class="mini-events" id="dash-events-lines"></div>
+          </section>
+        </section>
+
+        <section class="source-grid" id="sources"></section>
+
+        <section class="layout">
+          <article class="panel feed-panel">
+            <div class="panel-head">
+              <h2>Live RF Event Feed</h2>
+              <span id="event-count">0</span>
+            </div>
+            <div class="feed" id="event-feed"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h2>Satellite Captures</h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Satellite</th>
+                    <th>Status</th>
+                    <th>Image</th>
+                    <th>Seen</th>
+                  </tr>
+                </thead>
+                <tbody id="captures-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="tables">
+          <article class="panel">
+            <div class="panel-head">
+              <h2>APRS</h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Callsign</th>
+                    <th>Packet</th>
+                  </tr>
+                </thead>
+                <tbody id="aprs-table"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h2>ADS-B</h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Flight</th>
+                    <th>Position</th>
+                    <th>Alt</th>
+                    <th>Speed</th>
+                  </tr>
+                </thead>
+                <tbody id="adsb-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-overview">
         <article class="panel overview-panel">
           <div class="panel-head">
-            <h2>RF Lens Overview</h2>
+            <h2>RF Overview</h2>
             <span id="overview-updated">waiting</span>
           </div>
           <div class="overview-grid">
@@ -81,10 +223,7 @@
           <section class="overview-events">
             <div class="panel-head compact-head">
               <h2>Recent RF Events</h2>
-              <div class="panel-meta">
-                <span class="quiet-note">routine ADS-B hidden</span>
-                <span id="overview-events-count">0</span>
-              </div>
+              <span id="overview-events-count">0</span>
             </div>
             <div class="feed" id="overview-event-feed"></div>
           </section>

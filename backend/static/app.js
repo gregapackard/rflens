@@ -246,11 +246,8 @@ function sourceTypeForEvent(event, sources) {
 
 function renderHealthOnline(online) {
   state.healthOnline = online;
-  const health = $("health");
-  if (health) {
-    health.textContent = online ? "online" : "offline";
-    health.className = `pulse ${online ? "online" : "offline"}`;
-  }
+  $("health").textContent = online ? "online" : "offline";
+  $("health").className = `pulse ${online ? "online" : "offline"}`;
   setText("dash-global-health", online ? "Online" : "Offline");
 }
 
@@ -268,7 +265,7 @@ async function pollHealth() {
 function renderSources(sources) {
   const wanted = ["aprs", "adsb", "satellite"];
   const byType = Object.fromEntries(sources.map((source) => [source.type, source]));
-  setHtml("sources", wanted.map((type) => {
+  $("sources").innerHTML = wanted.map((type) => {
     const source = byType[type] || { name: type.toUpperCase(), status: "unknown" };
     const status = sourceStatus(source);
     return `
@@ -282,39 +279,7 @@ function renderSources(sources) {
         </dl>
       </article>
     `;
-  }).join(""));
-}
-
-function isAdsbAlert(event) {
-  const metadata = parseMetadata(event);
-  const squawk = String(metadata.squawk || event.squawk || "").trim();
-  return Boolean(
-    metadata.emergency
-    || metadata.alert
-    || metadata.spi
-    || ["7500", "7600", "7700"].includes(squawk)
-  );
-}
-
-function isSignificantAdsb(event, maxRange) {
-  const altitude = Number(event.altitude);
-  const range = adsbRange(event);
-  const rssi = adsbRssi(event);
-  return Boolean(
-    altitude >= 40000
-    || isAdsbAlert(event)
-    || (Number.isFinite(range) && range >= Math.max(150, maxRange * 0.9))
-    || (Number.isFinite(rssi) && rssi >= -2)
-  );
-}
-
-function dashboardEvents(events) {
-  const adsbRanges = events
-    .filter((event) => event.event_type === "adsb_aircraft")
-    .map(adsbRange)
-    .filter(Number.isFinite);
-  const maxRange = adsbRanges.length ? Math.max(...adsbRanges) : 0;
-  return events.filter((event) => event.event_type !== "adsb_aircraft" || isSignificantAdsb(event, maxRange));
+  }).join("");
 }
 
 function renderFeed(events, targetId, limit = 20) {
@@ -335,11 +300,10 @@ function renderFeed(events, targetId, limit = 20) {
 
 function renderEvents(events, sources) {
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
-  const dashboardNewest = dashboardEvents(newest);
   const recent = newest.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   setText("event-count", newest.length);
   setText("events-tab-count", newest.length);
-  setText("overview-events-count", dashboardNewest.length);
+  setText("overview-events-count", newest.length);
   setText("dash-events-recent", newest.length ? `${recent.length} events` : "No data yet");
   setText("dash-events-types", summarizeCounts(countBy(newest, (event) => event.event_type)));
   setText("dash-events-sources", summarizeCounts(countBy(newest, (event) => sourceTypeForEvent(event, sources))));
@@ -348,7 +312,7 @@ function renderEvents(events, sources) {
   `).join("") || "<p>No data yet</p>");
   renderFeed(newest, "event-feed", 20);
   renderFeed(newest, "events-tab-feed", 20);
-  renderFeed(dashboardNewest, "overview-event-feed", 20);
+  renderFeed(newest, "overview-event-feed", 20);
   newest.forEach((event) => state.seenEvents.add(event.id));
 }
 
@@ -500,14 +464,12 @@ function renderSystemCard(system, sources) {
 }
 
 function renderOverview({ sources, adsb, aprs, captures, events, system }) {
-  const dashboardNewest = dashboardEvents(events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp)));
   renderGlobalCard({ sources });
   renderAdsbCard(adsb);
   renderAprsCard(aprs);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
-  renderFeed(dashboardNewest, "overview-event-feed", 20);
-  setText("overview-events-count", dashboardNewest.length);
+  renderFeed(events, "overview-event-feed", 20);
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);
 }
 
@@ -586,7 +548,7 @@ async function refreshData() {
     ]);
     state.station = station || {};
     state.adsbUi = adsbUi || { enabled: false, url: "" };
-    setText("station", `${state.station?.name || "RF Node"} ${state.station?.grid || ""}`.trim());
+    $("station").textContent = `${state.station?.name || "RF Node"} ${state.station?.grid || ""}`.trim();
     renderSources(sources);
     renderAdsbUi(state.adsbUi);
     renderEvents(events, sources);

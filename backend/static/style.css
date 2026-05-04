@@ -409,18 +409,6 @@ dd {
   font-weight: 800;
 }
 
-.panel-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.panel-head .quiet-note {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
 .feed {
   display: grid;
   max-height: 34rem;

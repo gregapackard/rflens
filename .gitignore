@@ -1,0 +1,10 @@
+
+data/*.db
+data/*.db-*
+*.sqlite
+*.sqlite3
+
+data/*.db
+data/*.db-*
+*.sqlite
+*.sqlite3

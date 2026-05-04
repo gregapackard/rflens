@@ -1,0 +1,38 @@
+database_path: "./data/rflens.db"
+
+station:
+  name: "RF Node"
+  lat: 39.9612
+  lon: -82.9988
+  grid: "EN80"
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+adsb_ui:
+  enabled: true
+  url: "http://192.168.1.225/tar1090/"
+
+sources:
+  aprs:
+    enabled: true
+    name: "APRS Direwolf"
+    device_index: 0
+    frequency: "144.390 MHz"
+    log_path: "./data/direwolf.log"
+
+  adsb:
+    enabled: true
+    name: "ADS-B readsb"
+    device_index: 1
+    frequency: "1090 MHz"
+    aircraft_json_path: "/run/readsb/aircraft.json"
+    poll_seconds: 2
+
+  satellite:
+    enabled: true
+    name: "SatDump Captures"
+    device_index: 2
+    frequency: "137 MHz"
+    captures_path: "/home/rfnode/meteor/captures"

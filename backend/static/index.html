@@ -261,6 +261,13 @@
               <h2>Live RF Event Feed</h2>
               <span id="events-tab-count">0</span>
             </div>
+            <div class="event-filters" aria-label="Events tab filters">
+              <label><input type="checkbox" data-event-filter="adsb"> ADS-B</label>
+              <label><input type="checkbox" data-event-filter="aprs" checked> APRS</label>
+              <label><input type="checkbox" data-event-filter="satellite" checked> Satellite</label>
+              <label><input type="checkbox" data-event-filter="system" checked> System</label>
+              <button class="secondary-button compact-button" type="button" id="events-show-all">Show all</button>
+            </div>
             <div class="feed" id="events-tab-feed"></div>
           </article>
 

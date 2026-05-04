@@ -6,6 +6,11 @@ const state = {
   healthOnline: false,
   adsbUi: { enabled: false, url: "" },
   adsbUiTimer: null,
+  eventFilters: { adsb: false, aprs: true, satellite: true, system: true },
+  latestEvents: [],
+  latestSources: [],
+  latestAdsb: [],
+  latestAprs: [],
 };
 
 const DATA_FETCH_LIMIT = 1000;
@@ -236,12 +241,27 @@ function summarizeCounts(counts, limit = 3) {
 }
 
 function sourceTypeForEvent(event, sources) {
-  const byId = new Map(sources.map((source) => [source.id, source.type]));
+  const byId = new Map(sources.map((source) => [String(source.id), source.type]));
   if (byId.has(event.source_id)) return byId.get(event.source_id);
+  if (byId.has(String(event.source_id))) return byId.get(String(event.source_id));
   if (event.event_type === "adsb_aircraft") return "adsb";
   if (event.event_type === "aprs_packet") return "aprs";
   if (event.event_type === "satellite_capture") return "satellite";
   return "unknown";
+}
+
+function eventFilterType(event, sources) {
+  const metadata = parseMetadata(event);
+  const sourceType = String(event.source_type || metadata.source_type || sourceTypeForEvent(event, sources) || "").toLowerCase();
+  const eventType = String(event.event_type || "").toLowerCase();
+  if (isAdsbLikeEvent(event, sources)) return "adsb";
+  if (sourceType === "aprs" || eventType.startsWith("aprs")) return "aprs";
+  if (sourceType === "satellite" || eventType.includes("satellite") || eventType.includes("capture")) return "satellite";
+  return "system";
+}
+
+function eventFilterEnabled(event, sources) {
+  return Boolean(state.eventFilters[eventFilterType(event, sources)]);
 }
 
 function renderHealthOnline(online) {
@@ -393,9 +413,10 @@ function renderOverviewFeed(events, sources, targetId, limit = 20) {
 
 function renderEvents(events, sources) {
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
+  const eventsTabEvents = newest.filter((event) => eventFilterEnabled(event, sources));
   const recent = newest.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   setText("event-count", newest.length);
-  setText("events-tab-count", newest.length);
+  setText("events-tab-count", eventsTabEvents.length);
   setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
   setText("dash-events-recent", newest.length ? `${recent.length} events` : "No data yet");
   setText("dash-events-types", summarizeCounts(countBy(newest, (event) => event.event_type)));
@@ -404,7 +425,7 @@ function renderEvents(events, sources) {
     <div><time>${esc(relTime(event.timestamp))}</time><span>${esc(eventLine(event))}</span></div>
   `).join("") || "<p>No data yet</p>");
   renderFeed(newest, "event-feed", 20);
-  renderFeed(newest, "events-tab-feed", 20);
+  renderFeed(eventsTabEvents, "events-tab-feed", 20);
   newest.forEach((event) => state.seenEvents.add(event.id));
 }
 
@@ -417,7 +438,7 @@ function renderAprsTable(events) {
     </tr>
   `).join("");
   setHtml("aprs-table", html);
-  setHtml("events-aprs-table", html);
+  setHtml("events-aprs-table", state.eventFilters.aprs ? html : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
 }
 
 function renderAdsbTable(events) {
@@ -431,7 +452,7 @@ function renderAdsbTable(events) {
     </tr>
   `).join("");
   setHtml("adsb-table", html);
-  setHtml("events-adsb-table", html);
+  setHtml("events-adsb-table", state.eventFilters.adsb ? html : `<tr><td colspan="5">ADS-B hidden by filter</td></tr>`);
 }
 
 function shortPath(path) {
@@ -627,6 +648,34 @@ document.addEventListener("click", (event) => {
   if (tabButton) switchTab(tabButton.dataset.openTab);
 });
 
+function syncEventFilterControls() {
+  document.querySelectorAll("[data-event-filter]").forEach((input) => {
+    input.checked = Boolean(state.eventFilters[input.dataset.eventFilter]);
+  });
+}
+
+function rerenderEventsTab() {
+  renderEvents(state.latestEvents, state.latestSources);
+  renderAprsTable(state.latestAprs);
+  renderAdsbTable(state.latestAdsb);
+}
+
+document.querySelectorAll("[data-event-filter]").forEach((input) => {
+  input.addEventListener("change", () => {
+    state.eventFilters[input.dataset.eventFilter] = input.checked;
+    rerenderEventsTab();
+  });
+});
+
+const showAllEvents = $("events-show-all");
+if (showAllEvents) {
+  showAllEvents.addEventListener("click", () => {
+    state.eventFilters = { adsb: true, aprs: true, satellite: true, system: true };
+    syncEventFilterControls();
+    rerenderEventsTab();
+  });
+}
+
 async function refreshData() {
   try {
     const [station, adsbUi, sources, adsb, aprs, captures, events, system] = await Promise.all([
@@ -641,6 +690,10 @@ async function refreshData() {
     ]);
     state.station = station || {};
     state.adsbUi = adsbUi || { enabled: false, url: "" };
+    state.latestEvents = events;
+    state.latestSources = sources;
+    state.latestAdsb = adsb;
+    state.latestAprs = aprs;
     $("station").textContent = `${state.station?.name || "RF Node"} ${state.station?.grid || ""}`.trim();
     renderSources(sources);
     renderAdsbUi(state.adsbUi);

@@ -464,6 +464,34 @@ dd {
   font-weight: 800;
 }
 
+.event-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(37, 50, 65, 0.7);
+  background: rgba(8, 14, 20, 0.3);
+}
+
+.event-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.event-filters input {
+  accent-color: var(--cyan);
+}
+
+.compact-button {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+}
+
 .feed {
   display: grid;
   max-height: 34rem;

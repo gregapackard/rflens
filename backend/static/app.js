@@ -329,38 +329,23 @@ function isSignificantAdsbEvent(event, maxRange) {
   return Boolean(
     isAdsbEmergency(event, metadata)
     || isWarningEvent(event)
-    || altitude >= 40000
-    || (Number.isFinite(range) && range >= 250)
-    || (Number.isFinite(rssi) && rssi >= -5)
-    || (Number.isFinite(range) && Number.isFinite(maxRange) && maxRange > 0 && range >= maxRange)
+    || altitude >= 45000
+    || (Number.isFinite(range) && range >= 300)
+    || (Number.isFinite(rssi) && rssi >= -3)
   );
 }
 
 function overviewEvents(events) {
   const adsbEvents = events.filter((event) => event.event_type === "adsb_aircraft");
   const maxRange = Math.max(0, ...adsbEvents.map(adsbRange).filter(Number.isFinite));
-  const significantAdsb = adsbEvents.filter((event) => isSignificantAdsbEvent(event, maxRange));
-  const filtered = events.filter((event) => {
+  return events.filter((event) => {
     if (event.event_type === "adsb_aircraft") return isSignificantAdsbEvent(event, maxRange);
     return true;
   });
-  return {
-    filtered,
-    adsbSeen: uniqueAircraftEvents(adsbEvents).length,
-    significantAdsbShown: significantAdsb.length,
-  };
 }
 
 function renderOverviewFeed(events, targetId, limit = 20) {
-  const { filtered, adsbSeen, significantAdsbShown } = overviewEvents(events);
-  const summary = `
-    <div class="feed-row">
-      <time>filter</time>
-      <strong>Routine ADS-B hidden</strong>
-      <span>ADS-B seen: ${esc(adsbSeen)} aircraft</span>
-      <p>Significant ADS-B shown: ${esc(significantAdsbShown)}</p>
-    </div>
-  `;
+  const filtered = overviewEvents(events);
   const html = filtered.slice(0, limit).map((event) => {
     const isNew = state.initialized && !state.seenEvents.has(event.id);
     const isRecent = secondsAgo(event.timestamp) <= 30;
@@ -373,7 +358,7 @@ function renderOverviewFeed(events, targetId, limit = 20) {
       </div>
     `;
   }).join("");
-  setHtml(targetId, summary + (html || `<div class="feed-row"><strong>No non-routine events yet</strong></div>`));
+  setHtml(targetId, html || `<div class="feed-row"><strong>No non-routine events yet</strong></div>`);
   return filtered.length;
 }
 

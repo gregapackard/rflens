@@ -134,6 +134,18 @@ main {
   display: block;
 }
 
+#tab-dashboard.active {
+  display: none;
+}
+
+#tab-dashboard.active + #tab-overview {
+  display: block;
+}
+
+#tab-dashboard.active + #tab-overview .overview-panel {
+  margin-bottom: 0;
+}
+
 .source-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

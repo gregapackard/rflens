@@ -298,12 +298,91 @@ function renderFeed(events, targetId, limit = 20) {
   setHtml(targetId, html || `<div class="feed-row"><strong>No data yet</strong></div>`);
 }
 
+function eventText(event) {
+  return `${event.event_type || ""} ${event.callsign || ""} ${event.raw_text || ""}`.toLowerCase();
+}
+
+function eventSquawk(event, metadata) {
+  return String(metadata.squawk || event.squawk || "").trim();
+}
+
+function isWarningEvent(event) {
+  const text = eventText(event);
+  return text.includes("warn") || text.includes("error") || text.includes("alert") || text.includes("emergency");
+}
+
+function isAdsbEmergency(event, metadata) {
+  const squawk = eventSquawk(event, metadata);
+  return Boolean(
+    metadata.emergency
+    || metadata.alert
+    || metadata.spi
+    || ["7500", "7600", "7700"].includes(squawk)
+  );
+}
+
+function isSignificantAdsbEvent(event, maxRange) {
+  const metadata = parseMetadata(event);
+  const altitude = Number(event.altitude);
+  const range = adsbRange(event);
+  const rssi = adsbRssi(event);
+  return Boolean(
+    isAdsbEmergency(event, metadata)
+    || isWarningEvent(event)
+    || altitude >= 40000
+    || (Number.isFinite(range) && range >= 250)
+    || (Number.isFinite(rssi) && rssi >= -5)
+    || (Number.isFinite(range) && Number.isFinite(maxRange) && maxRange > 0 && range >= maxRange)
+  );
+}
+
+function overviewEvents(events) {
+  const adsbEvents = events.filter((event) => event.event_type === "adsb_aircraft");
+  const maxRange = Math.max(0, ...adsbEvents.map(adsbRange).filter(Number.isFinite));
+  const significantAdsb = adsbEvents.filter((event) => isSignificantAdsbEvent(event, maxRange));
+  const filtered = events.filter((event) => {
+    if (event.event_type === "adsb_aircraft") return isSignificantAdsbEvent(event, maxRange);
+    return true;
+  });
+  return {
+    filtered,
+    adsbSeen: uniqueAircraftEvents(adsbEvents).length,
+    significantAdsbShown: significantAdsb.length,
+  };
+}
+
+function renderOverviewFeed(events, targetId, limit = 20) {
+  const { filtered, adsbSeen, significantAdsbShown } = overviewEvents(events);
+  const summary = `
+    <div class="feed-row">
+      <time>filter</time>
+      <strong>Routine ADS-B hidden</strong>
+      <span>ADS-B seen: ${esc(adsbSeen)} aircraft</span>
+      <p>Significant ADS-B shown: ${esc(significantAdsbShown)}</p>
+    </div>
+  `;
+  const html = filtered.slice(0, limit).map((event) => {
+    const isNew = state.initialized && !state.seenEvents.has(event.id);
+    const isRecent = secondsAgo(event.timestamp) <= 30;
+    return `
+      <div class="feed-row ${isNew || isRecent ? "new" : ""}">
+        <time>${esc(relTime(event.timestamp))}</time>
+        <strong>${esc(eventLine(event))}</strong>
+        <span>${esc(event.event_type || "-")}</span>
+        <p>${esc(eventDetail(event))}</p>
+      </div>
+    `;
+  }).join("");
+  setHtml(targetId, summary + (html || `<div class="feed-row"><strong>No non-routine events yet</strong></div>`));
+  return filtered.length;
+}
+
 function renderEvents(events, sources) {
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
   const recent = newest.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   setText("event-count", newest.length);
   setText("events-tab-count", newest.length);
-  setText("overview-events-count", newest.length);
+  setText("overview-events-count", renderOverviewFeed(newest, "overview-event-feed", 20));
   setText("dash-events-recent", newest.length ? `${recent.length} events` : "No data yet");
   setText("dash-events-types", summarizeCounts(countBy(newest, (event) => event.event_type)));
   setText("dash-events-sources", summarizeCounts(countBy(newest, (event) => sourceTypeForEvent(event, sources))));
@@ -312,7 +391,6 @@ function renderEvents(events, sources) {
   `).join("") || "<p>No data yet</p>");
   renderFeed(newest, "event-feed", 20);
   renderFeed(newest, "events-tab-feed", 20);
-  renderFeed(newest, "overview-event-feed", 20);
   newest.forEach((event) => state.seenEvents.add(event.id));
 }
 
@@ -469,7 +547,8 @@ function renderOverview({ sources, adsb, aprs, captures, events, system }) {
   renderAprsCard(aprs);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
-  renderFeed(events, "overview-event-feed", 20);
+  const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
+  setText("overview-events-count", renderOverviewFeed(newest, "overview-event-feed", 20));
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);
 }
 

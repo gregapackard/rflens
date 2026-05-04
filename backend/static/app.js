@@ -298,54 +298,76 @@ function renderFeed(events, targetId, limit = 20) {
   setHtml(targetId, html || `<div class="feed-row"><strong>No data yet</strong></div>`);
 }
 
-function eventText(event) {
-  return `${event.event_type || ""} ${event.callsign || ""} ${event.raw_text || ""}`.toLowerCase();
-}
-
 function eventSquawk(event, metadata) {
   return String(metadata.squawk || event.squawk || "").trim();
 }
 
-function isWarningEvent(event) {
-  const text = eventText(event);
-  return text.includes("warn") || text.includes("error") || text.includes("alert") || text.includes("emergency");
+function flagIsSet(value) {
+  if (value === true || value === 1) return true;
+  if (typeof value === "string") {
+    const text = value.trim().toLowerCase();
+    return Boolean(text && !["0", "false", "none", "null", "undefined", "no"].includes(text));
+  }
+  return value != null && value !== false && value !== 0;
 }
 
-function isAdsbEmergency(event, metadata) {
+function alertFlagIsSet(value) {
+  const text = String(value).trim().toLowerCase();
+  return value === true || value === 1 || text === "true" || text === "1";
+}
+
+function eventRange(event, metadata) {
+  const range = Number(metadata.r_dst ?? metadata.range ?? event.r_dst ?? event.range);
+  return Number.isFinite(range) ? range : null;
+}
+
+function eventAltitude(event, metadata) {
+  const altitude = Number(event.altitude ?? metadata.altitude ?? metadata.alt_baro);
+  return Number.isFinite(altitude) ? altitude : null;
+}
+
+function hasAdsbMetadata(metadata) {
+  return ["hex", "flight", "alt_baro", "r_dst", "rssi"].some((key) => Object.prototype.hasOwnProperty.call(metadata, key));
+}
+
+function isAdsbLikeEvent(event, sources) {
+  const metadata = parseMetadata(event);
+  const source = sources.find((item) => String(item.id) === String(event.source_id));
+  const sourceType = String(event.source_type || metadata.source_type || source?.type || sourceTypeForEvent(event, sources) || "").toLowerCase();
+  const eventType = String(event.event_type || "").toLowerCase();
+  return Boolean(
+    sourceType === "adsb"
+    || eventType.startsWith("adsb")
+    || hasAdsbMetadata(metadata)
+  );
+}
+
+function isExceptionalAdsbEvent(event) {
+  const metadata = parseMetadata(event);
   const squawk = eventSquawk(event, metadata);
   return Boolean(
-    metadata.emergency
-    || metadata.alert
-    || metadata.spi
-    || ["7500", "7600", "7700"].includes(squawk)
+    ["7500", "7600", "7700"].includes(squawk)
+    || flagIsSet(metadata.emergency ?? event.emergency)
+    || alertFlagIsSet(metadata.alert ?? event.alert)
+    || alertFlagIsSet(metadata.spi ?? event.spi)
   );
 }
 
-function isSignificantAdsbEvent(event, maxRange) {
-  const metadata = parseMetadata(event);
-  const altitude = Number(event.altitude);
-  const range = adsbRange(event);
-  const rssi = adsbRssi(event);
-  return Boolean(
-    isAdsbEmergency(event, metadata)
-    || isWarningEvent(event)
-    || altitude >= 45000
-    || (Number.isFinite(range) && range >= 300)
-    || (Number.isFinite(rssi) && rssi >= -3)
-  );
-}
-
-function overviewEvents(events) {
-  const adsbEvents = events.filter((event) => event.event_type === "adsb_aircraft");
-  const maxRange = Math.max(0, ...adsbEvents.map(adsbRange).filter(Number.isFinite));
-  return events.filter((event) => {
-    if (event.event_type === "adsb_aircraft") return isSignificantAdsbEvent(event, maxRange);
+function filterOverviewFeedEvents(events, sources = []) {
+  const filteredEvents = events.filter((event) => {
+    if (isAdsbLikeEvent(event, sources)) {
+      const allowed = isExceptionalAdsbEvent(event);
+      if (!allowed) console.log("Filtered out ADS-B:", event.event_type, event.callsign);
+      return allowed;
+    }
     return true;
   });
+  console.log("Overview feed events:", filteredEvents.map((event) => [event.event_type, event.callsign]));
+  return filteredEvents;
 }
 
-function renderOverviewFeed(events, targetId, limit = 20) {
-  const filtered = overviewEvents(events);
+function renderOverviewFeed(events, sources, targetId, limit = 20) {
+  const filtered = filterOverviewFeedEvents(events, sources);
   const html = filtered.slice(0, limit).map((event) => {
     const isNew = state.initialized && !state.seenEvents.has(event.id);
     const isRecent = secondsAgo(event.timestamp) <= 30;
@@ -367,7 +389,7 @@ function renderEvents(events, sources) {
   const recent = newest.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   setText("event-count", newest.length);
   setText("events-tab-count", newest.length);
-  setText("overview-events-count", renderOverviewFeed(newest, "overview-event-feed", 20));
+  setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
   setText("dash-events-recent", newest.length ? `${recent.length} events` : "No data yet");
   setText("dash-events-types", summarizeCounts(countBy(newest, (event) => event.event_type)));
   setText("dash-events-sources", summarizeCounts(countBy(newest, (event) => sourceTypeForEvent(event, sources))));
@@ -533,7 +555,7 @@ function renderOverview({ sources, adsb, aprs, captures, events, system }) {
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
-  setText("overview-events-count", renderOverviewFeed(newest, "overview-event-feed", 20));
+  setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);
 }
 

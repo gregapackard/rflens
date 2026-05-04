@@ -1,10 +1,12 @@
+venv/
+__pycache__/
+*/__pycache__/
+*.pyc
 
-data/*.db
-data/*.db-*
-*.sqlite
-*.sqlite3
+config.yaml
 
-data/*.db
-data/*.db-*
+data/
+*.db
+*.db-*
 *.sqlite
 *.sqlite3

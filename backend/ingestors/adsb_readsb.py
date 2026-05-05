@@ -11,11 +11,13 @@ from backend.config import load_config, resolve_path, source_config
 from backend.db import get_or_create_source, insert_event, touch_source
 
 EARTH_RADIUS_NMI = 3440.065
-DEFAULT_MIN_INSERT_SECONDS = 60
+DEFAULT_MIN_INSERT_SECONDS = 120
 DEFAULT_MIN_DISTANCE_NMI = 2
 DEFAULT_MIN_ALTITUDE_CHANGE_FT = 1000
 DEFAULT_MIN_RANGE_CHANGE_NMI = 10
 STRONG_POSITIONLESS_RSSI_DB = -5
+MAX_REASONABLE_RANGE_NMI = 500
+MAX_REASONABLE_ALTITUDE_FT = 60000
 
 
 @dataclass
@@ -33,6 +35,13 @@ class InsertThresholds:
     min_distance_nmi: float
     min_altitude_change_ft: float
     min_range_change_nmi: float
+
+
+@dataclass
+class BestSeen:
+    range_nmi: float | None = None
+    altitude: float | None = None
+    rssi: float | None = None
 
 
 def number(value: Any) -> float | None:
@@ -115,16 +124,57 @@ def has_valid_position(aircraft: dict[str, Any]) -> bool:
     return valid_coord(number(aircraft.get("lat")), number(aircraft.get("lon")))
 
 
-def is_record_candidate(aircraft: dict[str, Any]) -> bool:
+def beats_best_seen(value: float | None, best_value: float | None) -> bool:
+    return value is not None and (best_value is None or value > best_value)
+
+
+def is_record_candidate(aircraft: dict[str, Any], best_seen: BestSeen) -> bool:
     altitude = altitude_value(aircraft)
     positioned = has_valid_position(aircraft)
     range_nmi = aircraft_range(aircraft)
     rssi = number(aircraft.get("rssi"))
     return (
-        (altitude is not None and positioned and 45000 <= altitude <= 60000)
-        or (range_nmi is not None and positioned and 250 <= range_nmi <= 500)
-        or (rssi is not None and STRONG_POSITIONLESS_RSSI_DB <= rssi <= 5)
+        (
+            altitude is not None
+            and positioned
+            and 0 <= altitude <= MAX_REASONABLE_ALTITUDE_FT
+            and beats_best_seen(altitude, best_seen.altitude)
+        )
+        or (
+            range_nmi is not None
+            and positioned
+            and 0 <= range_nmi <= MAX_REASONABLE_RANGE_NMI
+            and beats_best_seen(range_nmi, best_seen.range_nmi)
+        )
+        or (
+            rssi is not None
+            and STRONG_POSITIONLESS_RSSI_DB <= rssi <= 5
+            and beats_best_seen(rssi, best_seen.rssi)
+        )
     )
+
+
+def update_best_seen(aircraft: dict[str, Any], best_seen: BestSeen) -> None:
+    positioned = has_valid_position(aircraft)
+    altitude = altitude_value(aircraft)
+    range_nmi = aircraft_range(aircraft)
+    rssi = number(aircraft.get("rssi"))
+    if (
+        altitude is not None
+        and positioned
+        and 0 <= altitude <= MAX_REASONABLE_ALTITUDE_FT
+        and beats_best_seen(altitude, best_seen.altitude)
+    ):
+        best_seen.altitude = altitude
+    if (
+        range_nmi is not None
+        and positioned
+        and 0 <= range_nmi <= MAX_REASONABLE_RANGE_NMI
+        and beats_best_seen(range_nmi, best_seen.range_nmi)
+    ):
+        best_seen.range_nmi = range_nmi
+    if rssi is not None and STRONG_POSITIONLESS_RSSI_DB <= rssi <= 5 and beats_best_seen(rssi, best_seen.rssi):
+        best_seen.rssi = rssi
 
 
 def read_aircraft(path: Path) -> list[dict[str, Any]]:
@@ -162,8 +212,9 @@ def should_store_aircraft(
     previous: AircraftState | None,
     now: float,
     thresholds: InsertThresholds,
+    best_seen: BestSeen,
 ) -> bool:
-    if has_emergency_signal(aircraft) or is_record_candidate(aircraft):
+    if has_emergency_signal(aircraft) or is_record_candidate(aircraft, best_seen):
         return True
 
     if not has_valid_position(aircraft):
@@ -224,6 +275,7 @@ def run_forever() -> None:
         min_range_change_nmi=config_number(cfg, "min_range_change_nmi", DEFAULT_MIN_RANGE_CHANGE_NMI),
     )
     last_stored: dict[str, AircraftState] = {}
+    best_seen = BestSeen()
 
     while True:
         try:
@@ -233,10 +285,11 @@ def run_forever() -> None:
                 if not isinstance(item, dict):
                     continue
                 key = aircraft_key(item)
-                if not should_store_aircraft(item, last_stored.get(key), now, thresholds):
+                if not should_store_aircraft(item, last_stored.get(key), now, thresholds, best_seen):
                     continue
                 store_aircraft(source_id, item)
                 last_stored[key] = aircraft_state(item, now)
+                update_best_seen(item, best_seen)
             touch_source(source_id, "online")
         except FileNotFoundError:
             touch_source(source_id, "missing")

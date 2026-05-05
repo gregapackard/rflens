@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -8,6 +9,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .config import get_database_path, load_config
+
+
+LOGGER = logging.getLogger(__name__)
+SQLITE_TIMEOUT_SECONDS = 10.0
+SQLITE_BUSY_TIMEOUT_MS = 10000
+WAL_CONFIGURED_PATHS: set[str] = set()
 
 
 SCHEMA = """
@@ -69,12 +76,32 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def configure_wal(conn: sqlite3.Connection, path: Path) -> None:
+    if path.name == ":memory:":
+        return
+    key = str(path.resolve())
+    if key in WAL_CONFIGURED_PATHS:
+        return
+    try:
+        current = conn.execute("PRAGMA journal_mode").fetchone()
+        mode = str(current[0]).lower() if current else ""
+        if mode != "wal":
+            current = conn.execute("PRAGMA journal_mode = WAL").fetchone()
+            mode = str(current[0]).lower() if current else ""
+        if mode == "wal":
+            WAL_CONFIGURED_PATHS.add(key)
+    except sqlite3.OperationalError as exc:
+        LOGGER.warning("Could not enable SQLite WAL mode: %s", exc)
+
+
 @contextmanager
 def connect(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
     path = Path(db_path) if db_path else get_database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+    configure_wal(conn, path)
     try:
         yield conn
         conn.commit()
@@ -85,7 +112,7 @@ def connect(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
 def init_db(db_path: str | Path | None = None) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
-        seed_records_from_events(conn)
+        cleanup_invalid_records(conn)
     ensure_configured_sources()
 
 
@@ -146,6 +173,18 @@ def as_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if number == number else None
+
+
+def valid_coord(lat: Any, lon: Any) -> bool:
+    latitude = as_float(lat)
+    longitude = as_float(lon)
+    return (
+        latitude is not None
+        and longitude is not None
+        and abs(latitude) <= 90
+        and abs(longitude) <= 180
+        and not (latitude == 0 and longitude == 0)
+    )
 
 
 def format_count(value: float | int) -> str:
@@ -234,13 +273,16 @@ def update_records_for_event(
     event_type: str,
     timestamp: str | None,
     callsign: str | None,
+    lat: float | None,
+    lon: float | None,
     altitude: float | None,
     metadata_json: str | None,
 ) -> None:
     metadata = parse_metadata_payload(metadata_json)
     if event_type == "adsb_aircraft":
+        has_position = valid_coord(lat if lat is not None else metadata.get("lat"), lon if lon is not None else metadata.get("lon"))
         range_nmi = as_float(metadata.get("r_dst"))
-        if range_nmi is not None:
+        if range_nmi is not None and has_position and 0 <= range_nmi <= 500:
             upsert_max_record(
                 conn,
                 record_type="adsb_max_range",
@@ -255,7 +297,7 @@ def update_records_for_event(
         altitude_ft = as_float(altitude)
         if altitude_ft is None:
             altitude_ft = as_float(metadata.get("alt_baro"))
-        if altitude_ft is not None:
+        if altitude_ft is not None and has_position and 0 <= altitude_ft <= 60000:
             upsert_max_record(
                 conn,
                 record_type="adsb_highest_altitude",
@@ -268,7 +310,7 @@ def update_records_for_event(
                 metadata_json=metadata_json,
             )
         rssi = as_float(metadata.get("rssi"))
-        if rssi is not None:
+        if rssi is not None and -60 <= rssi <= 5:
             upsert_max_record(
                 conn,
                 record_type="adsb_strongest_signal",
@@ -313,28 +355,23 @@ def update_records_for_event(
             )
 
 
-def seed_records_from_events(conn: sqlite3.Connection) -> None:
-    record_count = conn.execute("SELECT COUNT(*) AS count FROM records").fetchone()["count"]
-    if record_count:
-        return
-    rows = conn.execute(
+def cleanup_invalid_records(conn: sqlite3.Connection) -> None:
+    conn.execute(
         """
-        SELECT id, event_type, timestamp, callsign, altitude, metadata_json
-        FROM events
-        WHERE event_type IN ('adsb_aircraft', 'satellite_capture')
-        ORDER BY timestamp ASC, id ASC
+        DELETE FROM records
+        WHERE record_type = 'adsb_highest_altitude'
+          AND (value IS NULL OR value < 0 OR value > 60000)
         """
-    ).fetchall()
-    for row in rows:
-        update_records_for_event(
-            conn,
-            event_id=int(row["id"]),
-            event_type=row["event_type"],
-            timestamp=row["timestamp"],
-            callsign=row["callsign"],
-            altitude=row["altitude"],
-            metadata_json=row["metadata_json"],
-        )
+    )
+
+
+def safe_update_records_for_event(conn: sqlite3.Connection, **kwargs: Any) -> None:
+    try:
+        update_records_for_event(conn, **kwargs)
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc).lower():
+            raise
+        LOGGER.warning("Skipping record update because SQLite is locked: %s", exc)
 
 
 def get_or_create_source(
@@ -424,12 +461,14 @@ def insert_event(
                 (utc_now(), source_id),
             )
         event_id = int(cur.lastrowid)
-        update_records_for_event(
+        safe_update_records_for_event(
             conn,
             event_id=event_id,
             event_type=event_type,
             timestamp=event_timestamp,
             callsign=callsign,
+            lat=lat,
+            lon=lon,
             altitude=altitude,
             metadata_json=payload,
         )

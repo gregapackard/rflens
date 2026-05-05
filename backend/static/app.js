@@ -11,6 +11,16 @@ const state = {
   latestSources: [],
   latestAdsb: [],
   latestAprs: [],
+  records: {
+    initialized: false,
+    adsbMaxRange: null,
+    adsbMaxAltitude: null,
+    aprsCallsigns: new Set(),
+    latestCaptureKey: null,
+    sourceStates: {},
+    diskHigh: false,
+    alerts: [],
+  },
 };
 
 const DATA_FETCH_LIMIT = 1000;
@@ -600,6 +610,107 @@ function renderHighlights({ adsb, aprs, captures, system }) {
   setText("highlight-system-disk", formatPercent(system?.disk?.percent));
 }
 
+function addRecordAlert(kind, title, detail) {
+  const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  state.records.alerts.unshift({
+    id,
+    kind,
+    title,
+    detail,
+    time: new Date().toISOString(),
+  });
+  state.records.alerts = state.records.alerts.slice(0, 10);
+}
+
+function renderRecordAlerts() {
+  if (!state.records.alerts.length) {
+    setHtml("records-alerts-list", `<div class="record-alert-empty">No alerts yet.</div>`);
+    return;
+  }
+  setHtml("records-alerts-list", state.records.alerts.map((alert) => `
+    <div class="record-alert ${esc(alert.kind)}">
+      <time>${esc(fmtTime(alert.time))}</time>
+      <strong>${esc(alert.title)}</strong>
+      <span>${esc(alert.detail)}</span>
+    </div>
+  `).join(""));
+}
+
+function captureKey(capture) {
+  if (!capture) return "";
+  return String(capture.id ?? capture.image_path ?? `${capture.satellite || "capture"}-${captureTime(capture) || ""}`);
+}
+
+function sourceAlertState(source) {
+  const status = String(source?.status || "").toLowerCase();
+  if (status.includes("offline") || status.includes("error") || status.includes("down")) return "offline";
+  if (!source?.last_seen || secondsAgo(source.last_seen) > LIVE_SECONDS) return "stale";
+  return "ok";
+}
+
+function renderRecordsAndAlerts({ sources, adsb, aprs, captures, system }) {
+  const aircraft = uniqueAircraftEvents(adsb);
+  const ranges = aircraft.map(adsbRange).filter(Number.isFinite);
+  const altitudes = aircraft.map(adsbAltitude).filter(Number.isFinite);
+  const maxRange = ranges.length ? Math.max(...ranges) : null;
+  const maxAltitude = altitudes.length ? Math.max(...altitudes) : null;
+  const callsigns = uniqueBy(aprs, (event) => event.callsign).map((event) => String(event.callsign || "").trim()).filter(Boolean);
+  const latestCapture = captures.slice().sort((a, b) => timeMs(captureTime(b)) - timeMs(captureTime(a)))[0];
+  const latestKey = captureKey(latestCapture);
+  const disk = Number(system?.disk?.percent);
+
+  if (!state.records.initialized) {
+    state.records.adsbMaxRange = maxRange;
+    state.records.adsbMaxAltitude = maxAltitude;
+    callsigns.forEach((callsign) => state.records.aprsCallsigns.add(callsign));
+    state.records.latestCaptureKey = latestKey || null;
+    sources.filter(expectedLive).forEach((source) => {
+      state.records.sourceStates[source.type] = sourceAlertState(source);
+    });
+    state.records.diskHigh = Number.isFinite(disk) && disk > 85;
+    state.records.initialized = true;
+    renderRecordAlerts();
+    return;
+  }
+
+  if (Number.isFinite(maxRange) && (state.records.adsbMaxRange == null || maxRange > state.records.adsbMaxRange)) {
+    state.records.adsbMaxRange = maxRange;
+    addRecordAlert("adsb", "ADS-B range record", `${maxRange.toFixed(1)} nmi`);
+  }
+  if (Number.isFinite(maxAltitude) && (state.records.adsbMaxAltitude == null || maxAltitude > state.records.adsbMaxAltitude)) {
+    state.records.adsbMaxAltitude = maxAltitude;
+    addRecordAlert("adsb", "ADS-B altitude record", `${maxAltitude.toLocaleString()} ft`);
+  }
+  callsigns.forEach((callsign) => {
+    if (!state.records.aprsCallsigns.has(callsign)) {
+      state.records.aprsCallsigns.add(callsign);
+      addRecordAlert("aprs", "New APRS station", callsign);
+    }
+  });
+  if (latestKey && latestKey !== state.records.latestCaptureKey) {
+    state.records.latestCaptureKey = latestKey;
+    addRecordAlert("satellite", "New satellite capture", `${latestCapture.satellite || "Satellite"} ${shortPath(latestCapture.image_path)}`);
+  }
+  sources.filter(expectedLive).forEach((source) => {
+    const current = sourceAlertState(source);
+    const previous = state.records.sourceStates[source.type];
+    if (current !== previous) {
+      state.records.sourceStates[source.type] = current;
+      if (current !== "ok") addRecordAlert("system", `${source.name || source.type} ${current}`, source.last_seen ? `Last seen ${relTime(source.last_seen)}` : "No recent data");
+    }
+  });
+  if (Number.isFinite(disk)) {
+    if (disk > 85 && !state.records.diskHigh) {
+      state.records.diskHigh = true;
+      addRecordAlert("system", "Disk usage high", `${disk.toFixed(0)}% used`);
+    } else if (disk <= 85) {
+      state.records.diskHigh = false;
+    }
+  }
+
+  renderRecordAlerts();
+}
+
 function renderOverview({ sources, adsb, aprs, captures, events, system }) {
   renderGlobalCard({ sources });
   renderAdsbCard(adsb);
@@ -607,6 +718,7 @@ function renderOverview({ sources, adsb, aprs, captures, events, system }) {
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
   renderHighlights({ adsb, aprs, captures, system });
+  renderRecordsAndAlerts({ sources, adsb, aprs, captures, system });
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
   setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);

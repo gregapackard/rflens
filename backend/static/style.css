@@ -414,6 +414,56 @@ dd {
   border-top: 1px solid var(--line);
 }
 
+.records-alerts {
+  border-top: 1px solid var(--line);
+}
+
+.records-alert-list {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem;
+}
+
+.record-alert,
+.record-alert-empty {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(8rem, 13rem) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid rgba(37, 50, 65, 0.72);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: rgba(8, 14, 20, 0.32);
+  color: #dce9f7;
+  font-size: 0.86rem;
+}
+
+.record-alert time {
+  color: var(--muted);
+}
+
+.record-alert strong {
+  color: var(--text);
+}
+
+.record-alert.adsb {
+  border-left: 3px solid var(--cyan);
+}
+
+.record-alert.aprs,
+.record-alert.satellite {
+  border-left: 3px solid var(--green);
+}
+
+.record-alert.system {
+  border-left: 3px solid var(--amber);
+}
+
+.record-alert-empty {
+  grid-template-columns: 1fr;
+  color: var(--muted);
+}
+
 .highlight-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

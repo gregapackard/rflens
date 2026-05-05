@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import load_config
-from .db import ensure_configured_sources, fetch_all, init_db, insert_event
+from .db import ensure_configured_sources, fetch_all, fetch_records, init_db, insert_event
 from .models import EventIn
 
 
@@ -139,6 +139,11 @@ def recent_adsb(limit: int = Query(100, ge=1, le=5000)) -> list[dict[str, object
 @app.get("/api/captures")
 def captures() -> list[dict[str, object]]:
     return fetch_all("SELECT * FROM captures ORDER BY start_time DESC, id DESC")
+
+
+@app.get("/api/records")
+def records() -> list[dict[str, object]]:
+    return fetch_records()
 
 
 @app.post("/api/events")

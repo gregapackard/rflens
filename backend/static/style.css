@@ -466,22 +466,57 @@ dd {
 
 .highlight-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 1rem;
   padding: 1rem;
 }
 
 .highlight-card {
+  display: grid;
+  gap: 0.45rem;
+  width: 100%;
   min-width: 0;
   border: 1px solid rgba(37, 50, 65, 0.74);
   border-radius: 8px;
   padding: 0.85rem;
   background: rgba(8, 14, 20, 0.32);
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .highlight-card h3 {
-  margin: 0 0 0.65rem;
+  margin: 0;
   font-size: 0.85rem;
+}
+
+.highlight-card strong {
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.highlight-card span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.record-card {
+  cursor: pointer;
+}
+
+.record-card:hover {
+  border-color: rgba(85, 214, 255, 0.46);
+  background: rgba(85, 214, 255, 0.08);
+}
+
+.record-card:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.record-card:disabled:hover {
+  border-color: rgba(37, 50, 65, 0.74);
+  background: rgba(8, 14, 20, 0.32);
 }
 
 .highlight-card dl {
@@ -490,6 +525,82 @@ dd {
 
 .highlight-card dl div {
   padding-top: 0.5rem;
+}
+
+.record-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(3, 7, 12, 0.7);
+}
+
+.record-modal[hidden] {
+  display: none;
+}
+
+.record-modal-panel {
+  width: min(46rem, 100%);
+  max-height: min(42rem, calc(100vh - 2rem));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+}
+
+.modal-close {
+  border: 1px solid rgba(85, 214, 255, 0.32);
+  border-radius: 8px;
+  width: 2rem;
+  height: 2rem;
+  background: rgba(85, 214, 255, 0.08);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.record-modal-body {
+  display: grid;
+  gap: 1rem;
+  max-height: calc(100vh - 8rem);
+  overflow: auto;
+  padding: 1rem;
+}
+
+.record-detail-list {
+  gap: 0;
+}
+
+.record-detail-list div {
+  min-height: 2.1rem;
+}
+
+.metadata-detail {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.metadata-detail h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.metadata-detail p {
+  color: var(--muted);
+}
+
+.metadata-detail th {
+  width: 13rem;
+  text-transform: none;
+}
+
+.metadata-detail td {
+  word-break: break-word;
 }
 
 #tab-dashboard.active + #tab-overview .overview-events {

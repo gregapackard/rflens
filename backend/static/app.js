@@ -11,6 +11,7 @@ const state = {
   latestSources: [],
   latestAdsb: [],
   latestAprs: [],
+  allTimeRecords: [],
   records: {
     initialized: false,
     adsbMaxRange: null,
@@ -113,6 +114,40 @@ function parseMetadata(row) {
   } catch {
     return {};
   }
+}
+
+const RECORD_DEFINITIONS = [
+  { record_type: "adsb_max_range", label: "ADS-B max range" },
+  { record_type: "adsb_highest_altitude", label: "ADS-B highest altitude" },
+  { record_type: "adsb_strongest_signal", label: "ADS-B strongest signal" },
+  { record_type: "satellite_total_captures", label: "Satellite total captures" },
+  { record_type: "satellite_latest_capture", label: "Satellite latest capture" },
+];
+
+function recordByType(records) {
+  return Object.fromEntries((records || []).map((record) => [record.record_type, record]));
+}
+
+function readableValue(value) {
+  if (value == null || value === "") return "-";
+  if (Array.isArray(value)) {
+    if (!value.length) return "No values";
+    return value.map(readableValue).join(", ");
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value);
+    if (!entries.length) return "No values";
+    return entries.map(([key, item]) => `${key}: ${readableValue(item)}`).join("; ");
+  }
+  return String(value);
+}
+
+function metadataRows(record) {
+  const metadata = parseMetadata(record);
+  return Object.entries(metadata)
+    .filter(([key]) => key !== "raw_json")
+    .map(([key, value]) => ({ key, value: readableValue(value) }))
+    .filter((row) => row.value && row.value !== "-");
 }
 
 function validCoord(lat, lon) {
@@ -592,22 +627,63 @@ function renderSystemCard(system, sources) {
   setMany(["dash-system-warnings", "overview-system-warnings"], warnings.length);
 }
 
-function renderHighlights({ adsb, aprs, captures, system }) {
-  const aircraft = uniqueAircraftEvents(adsb);
-  const ranges = aircraft.map(adsbRange).filter(Number.isFinite);
-  const altitudes = aircraft.map(adsbAltitude).filter(Number.isFinite);
-  const stations = uniqueBy(aprs, (event) => event.callsign);
-  const recentAprs = aprs.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
-  const latestCapture = captures.slice().sort((a, b) => timeMs(captureTime(b)) - timeMs(captureTime(a)))[0];
+function renderHighlights({ records }) {
+  const byType = recordByType(records);
+  const html = RECORD_DEFINITIONS.map((definition) => {
+    const record = byType[definition.record_type];
+    const value = record?.value_text || (record?.value != null ? record.value : "No data yet");
+    const detail = record?.callsign || (record?.timestamp ? fmtDateTime(record.timestamp) : "Waiting for an event");
+    return `
+      <button class="highlight-card record-card" type="button" data-record-type="${esc(definition.record_type)}" ${record ? "" : "disabled"}>
+        <h3>${esc(record?.label || definition.label)}</h3>
+        <strong>${esc(value)}</strong>
+        <span>${esc(detail)}</span>
+      </button>
+    `;
+  }).join("");
+  setHtml("highlight-grid", html);
+}
 
-  setText("highlight-adsb-range", ranges.length ? `${Math.max(...ranges).toFixed(1)} nmi` : "No data yet");
-  setText("highlight-adsb-altitude", altitudes.length ? `${Math.max(...altitudes).toLocaleString()} ft` : "No data yet");
-  setText("highlight-aprs-stations", aprs.length ? stations.length : "No data yet");
-  setText("highlight-aprs-recent", aprs.length ? `${recentAprs.length} packets` : "No data yet");
-  setText("highlight-sat-capture", latestCapture ? relTime(captureTime(latestCapture)) : "No data yet");
-  setText("highlight-sat-file", latestCapture?.image_path ? shortPath(latestCapture.image_path) : "No data yet");
-  setText("highlight-system-cpu", formatPercent(system?.cpu_percent));
-  setText("highlight-system-disk", formatPercent(system?.disk?.percent));
+function closeRecordModal() {
+  const modal = $("record-modal");
+  if (!modal) return;
+  modal.hidden = true;
+  modal.classList.remove("open");
+}
+
+function showRecordModal(recordType) {
+  const record = recordByType(state.allTimeRecords)[recordType];
+  if (!record) return;
+  const rows = metadataRows(record);
+  setText("record-modal-title", record.label || "Record");
+  setHtml("record-modal-body", `
+    <dl class="record-detail-list">
+      <div><dt>Label</dt><dd>${esc(record.label || "-")}</dd></div>
+      <div><dt>record_type</dt><dd>${esc(record.record_type || "-")}</dd></div>
+      <div><dt>Value</dt><dd>${esc(record.value_text || record.value || "-")}</dd></div>
+      <div><dt>Callsign</dt><dd>${esc(record.callsign || "-")}</dd></div>
+      <div><dt>Timestamp</dt><dd>${esc(record.timestamp ? fmtDateTime(record.timestamp) : "-")}</dd></div>
+      <div><dt>source_event_id</dt><dd>${esc(record.source_event_id || "-")}</dd></div>
+    </dl>
+    <div class="metadata-detail">
+      <h3>Metadata</h3>
+      ${rows.length ? `
+        <table>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <th>${esc(row.key)}</th>
+                <td>${esc(row.value)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      ` : `<p>No additional details stored.</p>`}
+    </div>
+  `);
+  const modal = $("record-modal");
+  modal.hidden = false;
+  modal.classList.add("open");
 }
 
 function addRecordAlert(kind, title, detail) {
@@ -711,13 +787,13 @@ function renderRecordsAndAlerts({ sources, adsb, aprs, captures, system }) {
   renderRecordAlerts();
 }
 
-function renderOverview({ sources, adsb, aprs, captures, events, system }) {
+function renderOverview({ sources, adsb, aprs, captures, events, system, records }) {
   renderGlobalCard({ sources });
   renderAdsbCard(adsb);
   renderAprsCard(aprs);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
-  renderHighlights({ adsb, aprs, captures, system });
+  renderHighlights({ records });
   renderRecordsAndAlerts({ sources, adsb, aprs, captures, system });
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
   setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
@@ -783,6 +859,14 @@ document.querySelectorAll(".tab").forEach((button) => {
 document.addEventListener("click", (event) => {
   const tabButton = event.target.closest("[data-open-tab]");
   if (tabButton) switchTab(tabButton.dataset.openTab);
+  const recordCard = event.target.closest("[data-record-type]");
+  if (recordCard) showRecordModal(recordCard.dataset.recordType);
+  const modalClose = event.target.closest("[data-close-record-modal]");
+  if (modalClose || event.target.id === "record-modal") closeRecordModal();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeRecordModal();
 });
 
 function syncEventFilterControls() {
@@ -815,7 +899,7 @@ if (showAllEvents) {
 
 async function refreshData() {
   try {
-    const [station, adsbUi, sources, adsb, aprs, captures, events, system] = await Promise.all([
+    const [station, adsbUi, sources, adsb, aprs, captures, events, system, records] = await Promise.all([
       getJson("/api/station"),
       getJson("/api/adsb/ui"),
       getJson("/api/sources"),
@@ -824,6 +908,7 @@ async function refreshData() {
       getJson("/api/captures"),
       getJson(`/api/events/recent?limit=${EVENT_FEED_LIMIT}`),
       getJson("/api/system"),
+      getJson("/api/records"),
     ]);
     state.station = station || {};
     state.adsbUi = adsbUi || { enabled: false, url: "" };
@@ -831,6 +916,7 @@ async function refreshData() {
     state.latestSources = sources;
     state.latestAdsb = adsb;
     state.latestAprs = aprs;
+    state.allTimeRecords = records || [];
     $("station").textContent = `${state.station?.name || "RF Node"} ${state.station?.grid || ""}`.trim();
     renderSources(sources);
     renderAdsbUi(state.adsbUi);
@@ -838,7 +924,7 @@ async function refreshData() {
     renderAprsTable(aprs);
     renderAdsbTable(adsb);
     renderCaptures(captures);
-    renderOverview({ sources, adsb, aprs, captures, events, system });
+    renderOverview({ sources, adsb, aprs, captures, events, system, records: state.allTimeRecords });
     state.initialized = true;
   } catch (error) {
     console.error(error);

@@ -4,7 +4,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -113,6 +113,7 @@ def init_db(db_path: str | Path | None = None) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
         cleanup_invalid_records(conn)
+        cleanup_old_events(conn)
     ensure_configured_sources()
 
 
@@ -363,6 +364,86 @@ def cleanup_invalid_records(conn: sqlite3.Connection) -> None:
           AND (value IS NULL OR value < 0 OR value > 60000)
         """
     )
+
+
+def retention_days(retention: dict[str, Any], key: str, default: int | None = None) -> int | None:
+    value = retention.get(key, default)
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        return None
+    return days if days > 0 else None
+
+
+def cutoff_for_days(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def delete_old_events(conn: sqlite3.Connection, event_type: str, days: int) -> int:
+    cur = conn.execute(
+        """
+        DELETE FROM events
+        WHERE event_type = ?
+          AND timestamp < ?
+        """,
+        (event_type, cutoff_for_days(days)),
+    )
+    return cur.rowcount
+
+
+def delete_old_routine_adsb_events(conn: sqlite3.Connection, days: int) -> int:
+    cur = conn.execute(
+        """
+        DELETE FROM events
+        WHERE event_type = 'adsb_aircraft'
+          AND timestamp < ?
+          AND COALESCE(metadata_json, '') NOT LIKE '%"squawk":"7500"%'
+          AND COALESCE(metadata_json, '') NOT LIKE '%"squawk":"7600"%'
+          AND COALESCE(metadata_json, '') NOT LIKE '%"squawk":"7700"%'
+          AND NOT (
+              COALESCE(metadata_json, '') LIKE '%"emergency"%'
+              AND COALESCE(metadata_json, '') NOT LIKE '%"emergency":"none"%'
+              AND COALESCE(metadata_json, '') NOT LIKE '%"emergency":null%'
+              AND COALESCE(metadata_json, '') NOT LIKE '%"emergency":false%'
+              AND COALESCE(metadata_json, '') NOT LIKE '%"emergency":0%'
+          )
+          AND COALESCE(metadata_json, '') NOT LIKE '%"alert":true%'
+          AND COALESCE(metadata_json, '') NOT LIKE '%"alert":1%'
+          AND COALESCE(metadata_json, '') NOT LIKE '%"spi":true%'
+          AND COALESCE(metadata_json, '') NOT LIKE '%"spi":1%'
+        """,
+        (cutoff_for_days(days),),
+    )
+    return cur.rowcount
+
+
+def cleanup_old_events(conn: sqlite3.Connection) -> None:
+    cfg = load_config()
+    retention = cfg.get("retention", {}) or {}
+    if not isinstance(retention, dict):
+        return
+
+    try:
+        adsb_days = retention_days(retention, "adsb_events_days", 7)
+        if adsb_days is not None:
+            deleted = delete_old_routine_adsb_events(conn, adsb_days)
+            if deleted:
+                LOGGER.info("Deleted %s old routine ADS-B events", deleted)
+
+        aprs_days = retention_days(retention, "aprs_events_days", 30)
+        if aprs_days is not None:
+            deleted = delete_old_events(conn, "aprs_packet", aprs_days)
+            if deleted:
+                LOGGER.info("Deleted %s old APRS events", deleted)
+
+        if "satellite_events_days" in retention:
+            satellite_days = retention_days(retention, "satellite_events_days")
+            if satellite_days is not None:
+                deleted = delete_old_events(conn, "satellite_capture", satellite_days)
+                if deleted:
+                    LOGGER.info("Deleted %s old satellite capture events", deleted)
+    except sqlite3.OperationalError as exc:
+        LOGGER.warning("Skipping event retention cleanup: %s", exc)
 
 
 def safe_update_records_for_event(conn: sqlite3.Connection, **kwargs: Any) -> None:

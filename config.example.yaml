@@ -10,6 +10,11 @@ server:
   host: "0.0.0.0"
   port: 8080
 
+retention:
+  adsb_events_days: 7
+  aprs_events_days: 30
+  satellite_events_days: 365
+
 adsb_ui:
   enabled: true
   url: "http://rfnode.local/tar1090/"

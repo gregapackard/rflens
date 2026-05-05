@@ -1,0 +1,14 @@
+[Unit]
+Description=RF Lens APRS Direwolf log ingestor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/rfnode/rflens
+ExecStart=/home/rfnode/rflens/venv/bin/python -m backend.ingestors.aprs_direwolf
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

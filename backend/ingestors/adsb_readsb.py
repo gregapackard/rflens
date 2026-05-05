@@ -11,10 +11,10 @@ from backend.config import load_config, resolve_path, source_config
 from backend.db import get_or_create_source, insert_event, touch_source
 
 EARTH_RADIUS_NMI = 3440.065
-DEFAULT_MIN_INSERT_SECONDS = 30
-DEFAULT_MIN_DISTANCE_NMI = 1
-DEFAULT_MIN_ALTITUDE_CHANGE_FT = 500
-DEFAULT_MIN_RANGE_CHANGE_NMI = 5
+DEFAULT_MIN_INSERT_SECONDS = 60
+DEFAULT_MIN_DISTANCE_NMI = 2
+DEFAULT_MIN_ALTITUDE_CHANGE_FT = 1000
+DEFAULT_MIN_RANGE_CHANGE_NMI = 10
 STRONG_POSITIONLESS_RSSI_DB = -5
 
 
@@ -171,8 +171,8 @@ def should_store_aircraft(
 
     if previous is None:
         return True
-    if now - previous.stored_at > thresholds.min_insert_seconds:
-        return True
+    if now - previous.stored_at < thresholds.min_insert_seconds:
+        return False
 
     current = aircraft_state(aircraft, now)
     moved = distance_nmi(previous.lat, previous.lon, current.lat, current.lon)

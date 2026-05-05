@@ -15,6 +15,7 @@ DEFAULT_MIN_INSERT_SECONDS = 30
 DEFAULT_MIN_DISTANCE_NMI = 1
 DEFAULT_MIN_ALTITUDE_CHANGE_FT = 500
 DEFAULT_MIN_RANGE_CHANGE_NMI = 5
+STRONG_POSITIONLESS_RSSI_DB = -5
 
 
 @dataclass
@@ -110,16 +111,19 @@ def has_emergency_signal(aircraft: dict[str, Any]) -> bool:
     )
 
 
+def has_valid_position(aircraft: dict[str, Any]) -> bool:
+    return valid_coord(number(aircraft.get("lat")), number(aircraft.get("lon")))
+
+
 def is_record_candidate(aircraft: dict[str, Any]) -> bool:
     altitude = altitude_value(aircraft)
-    lat = number(aircraft.get("lat"))
-    lon = number(aircraft.get("lon"))
+    positioned = has_valid_position(aircraft)
     range_nmi = aircraft_range(aircraft)
     rssi = number(aircraft.get("rssi"))
     return (
-        (altitude is not None and valid_coord(lat, lon) and 45000 <= altitude <= 60000)
-        or (range_nmi is not None and valid_coord(lat, lon) and 250 <= range_nmi <= 500)
-        or (rssi is not None and -5 <= rssi <= 5)
+        (altitude is not None and positioned and 45000 <= altitude <= 60000)
+        or (range_nmi is not None and positioned and 250 <= range_nmi <= 500)
+        or (rssi is not None and STRONG_POSITIONLESS_RSSI_DB <= rssi <= 5)
     )
 
 
@@ -159,9 +163,13 @@ def should_store_aircraft(
     now: float,
     thresholds: InsertThresholds,
 ) -> bool:
-    if previous is None:
-        return True
     if has_emergency_signal(aircraft) or is_record_candidate(aircraft):
+        return True
+
+    if not has_valid_position(aircraft):
+        return False
+
+    if previous is None:
         return True
     if now - previous.stored_at > thresholds.min_insert_seconds:
         return True

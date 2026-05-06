@@ -71,7 +71,7 @@ Logs are written to `./data/logs/`.
 
 Production-style systemd unit files live in `deploy/systemd/`. They assume RF Lens is installed at `/home/rfnode/rflens` with its virtualenv at `/home/rfnode/rflens/venv`.
 
-Install and start the API and ADS-B ingestor:
+Install and start the API, ADS-B ingestor, APRS radio pipeline, and APRS ingestor:
 
 ```bash
 cd /home/rfnode/rflens
@@ -82,7 +82,7 @@ The installer copies units into `/etc/systemd/system`, then runs:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now rflens-api rflens-adsb
+sudo systemctl enable --now rflens-api rflens-adsb rflens-aprs-radio rflens-aprs
 ```
 
 Check service status:
@@ -90,6 +90,8 @@ Check service status:
 ```bash
 sudo systemctl status rflens-api
 sudo systemctl status rflens-adsb
+sudo systemctl status rflens-aprs-radio
+sudo systemctl status rflens-aprs
 ```
 
 Follow logs:
@@ -97,14 +99,11 @@ Follow logs:
 ```bash
 journalctl -u rflens-api -f
 journalctl -u rflens-adsb -f
-```
-
-An optional APRS ingestor unit is installed but not enabled by default. It only runs `backend.ingestors.aprs_direwolf`; it does not start `rtl_fm` or Direwolf.
-
-```bash
-sudo systemctl enable --now rflens-aprs
+journalctl -u rflens-aprs-radio -f
 journalctl -u rflens-aprs -f
 ```
+
+The APRS radio unit runs `rtl_fm` for SDR serial `APRS001` at `144.390M` and pipes audio into Direwolf using `/home/rfnode/aprs/direwolf.conf`. It appends Direwolf output to `/home/rfnode/rflens/data/direwolf.log` with `tee`; RF Lens tails that log from the APRS ingestor service.
 
 Remove installed units:
 

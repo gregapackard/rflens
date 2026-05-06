@@ -1,0 +1,14 @@
+[Unit]
+Description=RF Lens APRS radio pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/rfnode/rflens
+ExecStart=/bin/bash -lc 'set -o pipefail; rtl_fm -d serial=APRS001 -f 144.390M -M fm -s 22050 -g 49 | direwolf -c /home/rfnode/aprs/direwolf.conf -r 22050 -t 0 - |& tee -a /home/rfnode/rflens/data/direwolf.log'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

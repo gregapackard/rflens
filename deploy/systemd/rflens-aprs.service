@@ -1,7 +1,7 @@
 [Unit]
 Description=RF Lens APRS Direwolf log ingestor
-After=network-online.target
-Wants=network-online.target
+After=rflens-aprs-radio.service
+Requires=rflens-aprs-radio.service
 
 [Service]
 Type=simple

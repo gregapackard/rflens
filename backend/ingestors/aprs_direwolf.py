@@ -9,16 +9,24 @@ from backend.config import resolve_path, source_config
 from backend.db import get_or_create_source, insert_event, touch_source
 
 
-CALLSIGN_RE = re.compile(r"\b([A-Z0-9]{1,2}[A-Z][A-Z0-9]{0,3}(?:-\d{1,2})?)\b", re.IGNORECASE)
+CALLSIGN_PATTERN = r"(?=[A-Z0-9]{1,6}(?:-\d{1,2})?>)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{1,6}(?:-\d{1,2})?"
+PACKET_RE = re.compile(
+    rf"^(?P<callsign>{CALLSIGN_PATTERN})>(?P<destination>[^,:\s]+)(?:,[^:]*)?:(?P<body>.*)$",
+    re.IGNORECASE,
+)
+BRACKET_PREFIX_RE = re.compile(r"^\[[^\]]+\]\s*")
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
-PACKET_HINTS = (">", "APRS", "WIDE", "qAR", "qAS", ":!", ":=", "`")
+
+
+def normalize_packet_line(line: str) -> str:
+    return BRACKET_PREFIX_RE.sub("", line.strip(), count=1)
 
 
 def packet_like(line: str) -> bool:
-    text = line.strip()
+    text = normalize_packet_line(line)
     if len(text) < 6:
         return False
-    return any(hint in text for hint in PACKET_HINTS) and bool(CALLSIGN_RE.search(text))
+    return PACKET_RE.match(text) is not None
 
 
 def parse_position(text: str) -> tuple[float | None, float | None]:
@@ -36,13 +44,10 @@ def parse_position(text: str) -> tuple[float | None, float | None]:
 
 
 def parse_line(line: str) -> dict[str, str | float | None]:
-    text = line.strip()
-    match = CALLSIGN_RE.search(text)
-    callsign = match.group(1).upper() if match else None
-    destination = None
-    if ">" in text:
-        right = text.split(">", 1)[1]
-        destination = right.split(",", 1)[0].split(":", 1)[0].strip() or None
+    text = normalize_packet_line(line)
+    match = PACKET_RE.match(text)
+    callsign = match.group("callsign").upper() if match else None
+    destination = match.group("destination").upper() if match else None
     lat, lon = parse_position(text)
     return {
         "callsign": callsign,

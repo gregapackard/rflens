@@ -566,6 +566,34 @@ function yesNo(value) {
   return value === true ? "yes" : "no";
 }
 
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function onlineText(value) {
+  if (value === true) return "Online";
+  if (value === false) return "Offline";
+  return "No data yet";
+}
+
+function aprsIsText(status) {
+  if (status.aprs_is_connected === true && status.aprs_is_verified === true) return "Connected + Verified";
+  if (status.aprs_is_connected === true) return "Connected";
+  if (status.aprs_is_connected === false) return "Disconnected";
+  return "No data yet";
+}
+
+function numberOrFallback(value, fallback = "No data yet") {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function audioText(level, quality) {
+  const number = Number(level);
+  if (!Number.isFinite(number)) return "No data yet";
+  return hasValue(quality) ? `${number} (${quality})` : String(number);
+}
+
 function renderAprsCard(aprs, aprsStatus = {}) {
   const stations = uniqueBy(aprs, (event) => event.callsign);
   const positioned = uniqueBy(aprs.filter((event) => validCoord(event.lat, event.lon)), (event) => event.callsign || `${event.lat},${event.lon}`);
@@ -576,19 +604,23 @@ function renderAprsCard(aprs, aprsStatus = {}) {
   const lastAudio = Number(aprsStatus.last_audio_level);
   const bestAudio = Number(aprsStatus.best_audio_level);
   const audioQuality = aprsStatus.last_audio_quality;
+  const lastRf = aprsStatus.last_rf_callsign && aprsStatus.last_rf_packet_at
+    ? `${aprsStatus.last_rf_callsign}, ${relTime(aprsStatus.last_rf_packet_at)}`
+    : (aprsStatus.last_rf_callsign || (newest ? `${newest.callsign || "station"}, ${relTime(newest.timestamp)}` : "No data yet"));
 
-  setMany(["dash-aprs-source", "overview-aprs-source"], aprsStatus.online ? "online" : "No data yet");
-  setMany(["dash-aprs-is", "overview-aprs-is"], aprsStatus.aprs_is_connected ? `connected / ${yesNo(aprsStatus.aprs_is_verified)} verified` : "No data yet");
-  setMany(["dash-aprs-last-rf", "overview-aprs-last-rf"], aprsStatus.last_rf_callsign || newest?.callsign || "No data yet");
+  setMany(["dash-aprs-source", "overview-aprs-source"], onlineText(aprsStatus.online));
+  setMany(["dash-aprs-callsign", "overview-aprs-callsign"], aprsStatus.callsign || "No data yet");
+  setMany(["dash-aprs-is", "overview-aprs-is"], aprsIsText(aprsStatus));
+  setMany(["dash-aprs-last-rf", "overview-aprs-last-rf"], lastRf);
   setMany(["dash-aprs-updated", "overview-aprs-updated"], aprsStatus.last_rf_packet_at ? relTime(aprsStatus.last_rf_packet_at) : (newest ? relTime(newest.timestamp) : "No data yet"));
-  setMany(["dash-aprs-stations", "overview-aprs-stations"], Number.isFinite(stationCount) && stationCount > 0 ? stationCount : (aprs.length ? stations.length : "No data yet"));
-  setMany(["dash-aprs-packets", "overview-aprs-packets"], Number.isFinite(heardTotal) && heardTotal > 0 ? heardTotal : (aprs.length ? aprs.length : "No data yet"));
+  setMany(["dash-aprs-stations", "overview-aprs-stations"], Number.isFinite(stationCount) ? stationCount : (aprs.length ? stations.length : "No data yet"));
+  setMany(["dash-aprs-packets", "overview-aprs-packets"], Number.isFinite(heardTotal) ? heardTotal : (aprs.length ? aprs.length : "No data yet"));
   setMany(["dash-aprs-positioned", "overview-aprs-positioned"], aprs.length ? positioned.length : "No data yet");
   setMany(["dash-aprs-newest", "overview-aprs-newest"], aprsStatus.last_rf_callsign || newest?.callsign || "No data yet");
   setMany(["dash-aprs-recent", "overview-aprs-recent"], aprs.length ? `${recent.length} packets` : "No data yet");
-  setMany(["dash-aprs-audio", "overview-aprs-audio"], Number.isFinite(lastAudio) ? `${lastAudio}${audioQuality ? ` (${audioQuality})` : ""}` : "No data yet");
-  setMany(["dash-aprs-best-audio", "overview-aprs-best-audio"], Number.isFinite(bestAudio) ? bestAudio : "No data yet");
-  setMany(["dash-aprs-server", "overview-aprs-server"], aprsStatus.aprs_is_server || "No data yet");
+  setMany(["dash-aprs-audio", "overview-aprs-audio"], audioText(lastAudio, audioQuality));
+  setMany(["dash-aprs-best-audio", "overview-aprs-best-audio"], numberOrFallback(bestAudio));
+  setMany(["dash-aprs-server", "overview-aprs-server"], hasValue(aprsStatus.aprs_is_server) ? aprsStatus.aprs_is_server : "No data yet");
 }
 
 function captureTime(capture) {
@@ -912,6 +944,15 @@ if (showAllEvents) {
   });
 }
 
+async function getAprsStatus() {
+  try {
+    return await getJson("/api/aprs/status");
+  } catch (error) {
+    console.warn("APRS status fetch failed", error);
+    return state.aprsStatus || {};
+  }
+}
+
 async function refreshData() {
   try {
     const [station, adsbUi, sources, adsb, aprs, aprsStatus, captures, events, system, records] = await Promise.all([
@@ -920,7 +961,7 @@ async function refreshData() {
       getJson("/api/sources"),
       getJson(`/api/adsb/recent?limit=${DATA_FETCH_LIMIT}`),
       getJson(`/api/aprs/recent?limit=${DATA_FETCH_LIMIT}`),
-      getJson("/api/aprs/status"),
+      getAprsStatus(),
       getJson("/api/captures"),
       getJson(`/api/events/recent?limit=${EVENT_FEED_LIMIT}`),
       getJson("/api/system"),

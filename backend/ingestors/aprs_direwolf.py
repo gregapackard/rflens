@@ -15,7 +15,7 @@ DUPLICATE_WINDOW_SECONDS = 60
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
 AUDIO_LEVEL_RE = re.compile(r"audio level\s*=\s*(\d+)\(([^)]*)\)", re.IGNORECASE)
-SERVER_RE = re.compile(r"\b([A-Za-z0-9.-]+\.(?:net|org|com)(?::\d+)?)\b")
+IGATE_SERVER_RE = re.compile(r"Now connected to IGate server\s+(\S+)\s+\([^)]+\)", re.IGNORECASE)
 STATUS_PREFIXES = (
     "#",
     "ERROR!!!",
@@ -71,7 +71,7 @@ def parse_igate_status(text: str) -> dict[str, Any]:
     }
     if f"logresp {APRS_CALLSIGN.lower()} verified" in lowered:
         fields["aprs_is_verified"] = True
-    server_match = SERVER_RE.search(text)
+    server_match = IGATE_SERVER_RE.search(text)
     if server_match:
         fields["aprs_is_server"] = server_match.group(1)
     return fields

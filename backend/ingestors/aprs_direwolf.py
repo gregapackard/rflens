@@ -9,6 +9,8 @@ from backend.config import resolve_path, source_config
 from backend.db import get_or_create_source, insert_event, touch_source
 
 
+OWN_CALLSIGNS = {"KF8GBU-10"}
+DUPLICATE_WINDOW_SECONDS = 60
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
 STATUS_PREFIXES = (
@@ -29,11 +31,21 @@ STATUS_PHRASES = (
 )
 
 
-def normalize_packet_line(line: str) -> str:
+def split_prefix(line: str) -> tuple[str | None, str]:
     text = line.strip()
     if text.startswith("[") and "]" in text:
-        text = text.split("]", 1)[1].strip()
+        prefix, rest = text.split("]", 1)
+        return prefix[1:].strip(), rest.strip()
+    return None, text
+
+
+def normalize_packet_line(line: str) -> str:
+    _prefix, text = split_prefix(line)
     return text
+
+
+def ignored_prefix(prefix: str | None) -> bool:
+    return bool(prefix and prefix.lower().startswith("ig"))
 
 
 def status_or_help_line(text: str) -> bool:
@@ -57,12 +69,18 @@ def parse_packet_header(text: str) -> tuple[str, str] | None:
 
 
 def packet_like(line: str) -> bool:
-    text = normalize_packet_line(line)
+    prefix, text = split_prefix(line)
+    if ignored_prefix(prefix):
+        return False
     if len(text) < 6:
         return False
     if status_or_help_line(text):
         return False
-    return parse_packet_header(text) is not None
+    parsed_header = parse_packet_header(text)
+    if not parsed_header:
+        return False
+    callsign, _destination = parsed_header
+    return callsign not in OWN_CALLSIGNS
 
 
 def parse_position(text: str) -> tuple[float | None, float | None]:
@@ -91,6 +109,17 @@ def parse_line(line: str) -> dict[str, str | float | None]:
         "lon": lon,
         "line": text,
     }
+
+
+def duplicate_packet(packet_line: str, seen_packets: dict[str, float], now: float) -> bool:
+    last_seen = seen_packets.get(packet_line)
+    expired = [line for line, seen_at in seen_packets.items() if now - seen_at > DUPLICATE_WINDOW_SECONDS]
+    for line in expired:
+        del seen_packets[line]
+    if last_seen is not None and now - last_seen < DUPLICATE_WINDOW_SECONDS:
+        return True
+    seen_packets[packet_line] = now
+    return False
 
 
 def follow(path: Path) -> Iterator[str]:
@@ -124,6 +153,7 @@ def run_forever() -> None:
         cfg.get("frequency"),
     )
     path = resolve_path(cfg.get("log_path", "./data/direwolf.log"))
+    seen_packets: dict[str, float] = {}
 
     for line in follow(path):
         if not line:
@@ -132,6 +162,9 @@ def run_forever() -> None:
         if not packet_like(line):
             continue
         parsed = parse_line(line)
+        packet_line = str(parsed.get("line") or "")
+        if duplicate_packet(packet_line, seen_packets, time.time()):
+            continue
         insert_event(
             source_id=source_id,
             event_type="aprs_packet",

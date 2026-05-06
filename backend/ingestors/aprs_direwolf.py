@@ -3,16 +3,19 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from backend.config import resolve_path, source_config
-from backend.db import get_or_create_source, insert_event, touch_source
+from backend.db import get_or_create_source, insert_event, reset_aprs_status, touch_source, update_aprs_status, utc_now
 
 
-OWN_CALLSIGNS = {"KF8GBU-10"}
+APRS_CALLSIGN = "KF8GBU-10"
+OWN_CALLSIGNS = {APRS_CALLSIGN}
 DUPLICATE_WINDOW_SECONDS = 60
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
+AUDIO_LEVEL_RE = re.compile(r"audio level\s*=\s*(\d+)\(([^)]*)\)", re.IGNORECASE)
+SERVER_RE = re.compile(r"\b([A-Za-z0-9.-]+\.(?:net|org|com)(?::\d+)?)\b")
 STATUS_PREFIXES = (
     "#",
     "ERROR!!!",
@@ -50,6 +53,33 @@ def ignored_prefix(prefix: str | None) -> bool:
 
 def status_or_help_line(text: str) -> bool:
     return any(text.startswith(prefix) for prefix in STATUS_PREFIXES) or any(phrase in text for phrase in STATUS_PHRASES)
+
+
+def parse_audio_status(text: str) -> tuple[int, str] | None:
+    match = AUDIO_LEVEL_RE.search(text)
+    if not match:
+        return None
+    return int(match.group(1)), match.group(2).strip()
+
+
+def parse_igate_status(text: str) -> dict[str, Any]:
+    lowered = text.lower()
+    fields: dict[str, Any] = {
+        "online": True,
+        "aprs_is_connected": True,
+        "last_igate_status_at": utc_now(),
+    }
+    if f"logresp {APRS_CALLSIGN.lower()} verified" in lowered:
+        fields["aprs_is_verified"] = True
+    server_match = SERVER_RE.search(text)
+    if server_match:
+        fields["aprs_is_server"] = server_match.group(1)
+    return fields
+
+
+def aprs_is_status_line(text: str) -> bool:
+    lowered = text.lower()
+    return "logresp" in lowered or "now connected" in lowered or "connected to" in lowered
 
 
 def parse_packet_header(text: str) -> tuple[str, str] | None:
@@ -122,6 +152,39 @@ def duplicate_packet(packet_line: str, seen_packets: dict[str, float], now: floa
     return False
 
 
+def update_ignored_igate(count: int, text: str) -> None:
+    fields = parse_igate_status(text)
+    fields["ignored_igate_lines"] = count
+    update_aprs_status(**fields)
+
+
+def update_ignored_status(count: int) -> None:
+    update_aprs_status(online=True, ignored_status_lines=count)
+
+
+def update_audio_metrics(level: int, quality: str, best_level: int | None, ignored_status_lines: int) -> None:
+    fields: dict[str, Any] = {
+        "online": True,
+        "last_audio_level": level,
+        "last_audio_quality": quality,
+        "last_audio_timestamp": utc_now(),
+        "ignored_status_lines": ignored_status_lines,
+    }
+    if best_level is None or level > best_level:
+        fields["best_audio_level"] = level
+    update_aprs_status(**fields)
+
+
+def update_rf_metrics(total: int, callsigns: set[str], last_callsign: str | None, timestamp: str) -> None:
+    update_aprs_status(
+        online=True,
+        last_rf_packet_at=timestamp,
+        last_rf_callsign=last_callsign,
+        rf_packets_heard_total=total,
+        unique_callsigns_seen=len(callsigns),
+    )
+
+
 def follow(path: Path) -> Iterator[str]:
     position = 0
     inode = None
@@ -154,10 +217,41 @@ def run_forever() -> None:
     )
     path = resolve_path(cfg.get("log_path", "./data/direwolf.log"))
     seen_packets: dict[str, float] = {}
+    seen_callsigns: set[str] = set()
+    rf_packets_heard_total = 0
+    ignored_igate_lines = 0
+    ignored_status_lines = 0
+    best_audio_level: int | None = None
+    reset_aprs_status(APRS_CALLSIGN)
 
     for line in follow(path):
         if not line:
             touch_source(source_id, "missing" if not path.exists() else "online")
+            continue
+        prefix, text = split_prefix(line)
+        if ignored_prefix(prefix):
+            ignored_igate_lines += 1
+            update_ignored_igate(ignored_igate_lines, text)
+            touch_source(source_id, "online")
+            continue
+        audio_status = parse_audio_status(text)
+        if audio_status:
+            ignored_status_lines += 1
+            level, quality = audio_status
+            update_audio_metrics(level, quality, best_audio_level, ignored_status_lines)
+            if best_audio_level is None or level > best_audio_level:
+                best_audio_level = level
+            touch_source(source_id, "online")
+            continue
+        if status_or_help_line(text):
+            ignored_status_lines += 1
+            if aprs_is_status_line(text):
+                fields = parse_igate_status(text)
+                fields["ignored_status_lines"] = ignored_status_lines
+                update_aprs_status(**fields)
+            else:
+                update_ignored_status(ignored_status_lines)
+            touch_source(source_id, "online")
             continue
         if not packet_like(line):
             continue
@@ -174,6 +268,12 @@ def run_forever() -> None:
             raw_text=line,
             metadata=parsed,
         )
+        packet_timestamp = utc_now()
+        rf_packets_heard_total += 1
+        callsign = str(parsed.get("callsign") or "")
+        if callsign:
+            seen_callsigns.add(callsign)
+        update_rf_metrics(rf_packets_heard_total, seen_callsigns, callsign or None, packet_timestamp)
 
 
 def main() -> None:

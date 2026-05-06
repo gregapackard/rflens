@@ -66,6 +66,27 @@ CREATE TABLE IF NOT EXISTS captures (
     metadata_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS aprs_status (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    callsign TEXT,
+    online INTEGER,
+    aprs_is_connected INTEGER,
+    aprs_is_verified INTEGER,
+    aprs_is_server TEXT,
+    last_igate_status_at TEXT,
+    last_rf_packet_at TEXT,
+    last_rf_callsign TEXT,
+    last_audio_level INTEGER,
+    last_audio_quality TEXT,
+    last_audio_timestamp TEXT,
+    best_audio_level INTEGER,
+    rf_packets_heard_total INTEGER,
+    unique_callsigns_seen INTEGER,
+    ignored_igate_lines INTEGER,
+    ignored_status_lines INTEGER,
+    updated_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_type_timestamp ON events(event_type, timestamp);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_captures_image_path ON captures(image_path);
@@ -444,6 +465,146 @@ def cleanup_old_events(conn: sqlite3.Connection) -> None:
                     LOGGER.info("Deleted %s old satellite capture events", deleted)
     except sqlite3.OperationalError as exc:
         LOGGER.warning("Skipping event retention cleanup: %s", exc)
+
+
+def default_aprs_status() -> dict[str, Any]:
+    return {
+        "online": False,
+        "callsign": "KF8GBU-10",
+        "aprs_is_connected": False,
+        "aprs_is_verified": False,
+        "aprs_is_server": None,
+        "last_igate_status_at": None,
+        "last_rf_packet_at": None,
+        "last_rf_callsign": None,
+        "last_audio_level": None,
+        "last_audio_quality": None,
+        "last_audio_timestamp": None,
+        "best_audio_level": None,
+        "rf_packets_heard_total": 0,
+        "unique_callsigns_seen": 0,
+        "ignored_igate_lines": 0,
+        "ignored_status_lines": 0,
+    }
+
+
+def ensure_aprs_status_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS aprs_status (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            callsign TEXT,
+            online INTEGER,
+            aprs_is_connected INTEGER,
+            aprs_is_verified INTEGER,
+            aprs_is_server TEXT,
+            last_igate_status_at TEXT,
+            last_rf_packet_at TEXT,
+            last_rf_callsign TEXT,
+            last_audio_level INTEGER,
+            last_audio_quality TEXT,
+            last_audio_timestamp TEXT,
+            best_audio_level INTEGER,
+            rf_packets_heard_total INTEGER,
+            unique_callsigns_seen INTEGER,
+            ignored_igate_lines INTEGER,
+            ignored_status_lines INTEGER,
+            updated_at TEXT
+        )
+        """
+    )
+
+
+def reset_aprs_status(callsign: str = "KF8GBU-10") -> None:
+    now = utc_now()
+    with connect() as conn:
+        ensure_aprs_status_table(conn)
+        conn.execute(
+            """
+            INSERT INTO aprs_status (
+                id, callsign, online, aprs_is_connected, aprs_is_verified,
+                rf_packets_heard_total, unique_callsigns_seen,
+                ignored_igate_lines, ignored_status_lines, updated_at
+            )
+            VALUES (1, ?, 1, 0, 0, 0, 0, 0, 0, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                callsign = excluded.callsign,
+                online = 1,
+                aprs_is_connected = 0,
+                aprs_is_verified = 0,
+                aprs_is_server = NULL,
+                last_igate_status_at = NULL,
+                last_rf_packet_at = NULL,
+                last_rf_callsign = NULL,
+                last_audio_level = NULL,
+                last_audio_quality = NULL,
+                last_audio_timestamp = NULL,
+                best_audio_level = NULL,
+                rf_packets_heard_total = 0,
+                unique_callsigns_seen = 0,
+                ignored_igate_lines = 0,
+                ignored_status_lines = 0,
+                updated_at = excluded.updated_at
+            """,
+            (callsign, now),
+        )
+
+
+def update_aprs_status(**fields: Any) -> None:
+    if not fields:
+        return
+    allowed = {
+        "online",
+        "callsign",
+        "aprs_is_connected",
+        "aprs_is_verified",
+        "aprs_is_server",
+        "last_igate_status_at",
+        "last_rf_packet_at",
+        "last_rf_callsign",
+        "last_audio_level",
+        "last_audio_quality",
+        "last_audio_timestamp",
+        "best_audio_level",
+        "rf_packets_heard_total",
+        "unique_callsigns_seen",
+        "ignored_igate_lines",
+        "ignored_status_lines",
+    }
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return
+    updates["updated_at"] = utc_now()
+    columns = ", ".join(f"{key} = ?" for key in updates)
+    values = tuple(updates.values())
+    with connect() as conn:
+        ensure_aprs_status_table(conn)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO aprs_status (
+                id, callsign, online, aprs_is_connected, aprs_is_verified,
+                rf_packets_heard_total, unique_callsigns_seen,
+                ignored_igate_lines, ignored_status_lines, updated_at
+            )
+            VALUES (1, 'KF8GBU-10', 1, 0, 0, 0, 0, 0, 0, ?)
+            """,
+            (utc_now(),),
+        )
+        conn.execute(f"UPDATE aprs_status SET {columns} WHERE id = 1", values)
+
+
+def fetch_aprs_status() -> dict[str, Any]:
+    with connect() as conn:
+        ensure_aprs_status_table(conn)
+        row = conn.execute("SELECT * FROM aprs_status WHERE id = 1").fetchone()
+    if not row:
+        return default_aprs_status()
+    status = row_to_dict(row)
+    for key in ("online", "aprs_is_connected", "aprs_is_verified"):
+        status[key] = bool(status.get(key))
+    for key in ("rf_packets_heard_total", "unique_callsigns_seen", "ignored_igate_lines", "ignored_status_lines"):
+        status[key] = int(status.get(key) or 0)
+    return status
 
 
 def safe_update_records_for_event(conn: sqlite3.Connection, **kwargs: Any) -> None:

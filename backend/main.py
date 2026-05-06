@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import load_config
-from .db import ensure_configured_sources, fetch_all, fetch_records, init_db, insert_event
+from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_records, init_db, insert_event
 from .models import EventIn
 
 
@@ -126,6 +126,11 @@ def recent_aprs(limit: int = Query(100, ge=1, le=5000)) -> list[dict[str, object
         "SELECT * FROM events WHERE event_type = 'aprs_packet' ORDER BY timestamp DESC, id DESC LIMIT ?",
         (limit,),
     )
+
+
+@app.get("/api/aprs/status")
+def aprs_status() -> dict[str, object]:
+    return fetch_aprs_status()
 
 
 @app.get("/api/adsb/recent")

@@ -11,6 +11,7 @@ const state = {
   latestSources: [],
   latestAdsb: [],
   latestAprs: [],
+  aprsStatus: {},
   allTimeRecords: [],
   records: {
     initialized: false,
@@ -561,19 +562,33 @@ function renderAdsbCard(adsb) {
   setMany(["dash-adsb-updated", "overview-adsb-updated"], lastUpdate ? relTime(lastUpdate) : "No data yet");
 }
 
-function renderAprsCard(aprs) {
+function yesNo(value) {
+  return value === true ? "yes" : "no";
+}
+
+function renderAprsCard(aprs, aprsStatus = {}) {
   const stations = uniqueBy(aprs, (event) => event.callsign);
   const positioned = uniqueBy(aprs.filter((event) => validCoord(event.lat, event.lon)), (event) => event.callsign || `${event.lat},${event.lon}`);
   const recent = aprs.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   const newest = aprs.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp))[0];
-  const stationCount = stations.length;
+  const stationCount = Number(aprsStatus.unique_callsigns_seen);
+  const heardTotal = Number(aprsStatus.rf_packets_heard_total);
+  const lastAudio = Number(aprsStatus.last_audio_level);
+  const bestAudio = Number(aprsStatus.best_audio_level);
+  const audioQuality = aprsStatus.last_audio_quality;
 
-  setMany(["dash-aprs-stations", "overview-aprs-stations"], aprs.length ? stationCount : "No data yet");
-  setMany(["dash-aprs-packets", "overview-aprs-packets"], aprs.length ? aprs.length : "No data yet");
+  setMany(["dash-aprs-source", "overview-aprs-source"], aprsStatus.online ? "online" : "No data yet");
+  setMany(["dash-aprs-is", "overview-aprs-is"], aprsStatus.aprs_is_connected ? `connected / ${yesNo(aprsStatus.aprs_is_verified)} verified` : "No data yet");
+  setMany(["dash-aprs-last-rf", "overview-aprs-last-rf"], aprsStatus.last_rf_callsign || newest?.callsign || "No data yet");
+  setMany(["dash-aprs-updated", "overview-aprs-updated"], aprsStatus.last_rf_packet_at ? relTime(aprsStatus.last_rf_packet_at) : (newest ? relTime(newest.timestamp) : "No data yet"));
+  setMany(["dash-aprs-stations", "overview-aprs-stations"], Number.isFinite(stationCount) && stationCount > 0 ? stationCount : (aprs.length ? stations.length : "No data yet"));
+  setMany(["dash-aprs-packets", "overview-aprs-packets"], Number.isFinite(heardTotal) && heardTotal > 0 ? heardTotal : (aprs.length ? aprs.length : "No data yet"));
   setMany(["dash-aprs-positioned", "overview-aprs-positioned"], aprs.length ? positioned.length : "No data yet");
-  setMany(["dash-aprs-updated", "overview-aprs-updated"], newest ? relTime(newest.timestamp) : "No data yet");
-  setMany(["dash-aprs-newest", "overview-aprs-newest"], newest?.callsign || "No data yet");
+  setMany(["dash-aprs-newest", "overview-aprs-newest"], aprsStatus.last_rf_callsign || newest?.callsign || "No data yet");
   setMany(["dash-aprs-recent", "overview-aprs-recent"], aprs.length ? `${recent.length} packets` : "No data yet");
+  setMany(["dash-aprs-audio", "overview-aprs-audio"], Number.isFinite(lastAudio) ? `${lastAudio}${audioQuality ? ` (${audioQuality})` : ""}` : "No data yet");
+  setMany(["dash-aprs-best-audio", "overview-aprs-best-audio"], Number.isFinite(bestAudio) ? bestAudio : "No data yet");
+  setMany(["dash-aprs-server", "overview-aprs-server"], aprsStatus.aprs_is_server || "No data yet");
 }
 
 function captureTime(capture) {
@@ -787,10 +802,10 @@ function renderRecordsAndAlerts({ sources, adsb, aprs, captures, system }) {
   renderRecordAlerts();
 }
 
-function renderOverview({ sources, adsb, aprs, captures, events, system, records }) {
+function renderOverview({ sources, adsb, aprs, aprsStatus, captures, events, system, records }) {
   renderGlobalCard({ sources });
   renderAdsbCard(adsb);
-  renderAprsCard(aprs);
+  renderAprsCard(aprs, aprsStatus);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
   renderHighlights({ records });
@@ -899,12 +914,13 @@ if (showAllEvents) {
 
 async function refreshData() {
   try {
-    const [station, adsbUi, sources, adsb, aprs, captures, events, system, records] = await Promise.all([
+    const [station, adsbUi, sources, adsb, aprs, aprsStatus, captures, events, system, records] = await Promise.all([
       getJson("/api/station"),
       getJson("/api/adsb/ui"),
       getJson("/api/sources"),
       getJson(`/api/adsb/recent?limit=${DATA_FETCH_LIMIT}`),
       getJson(`/api/aprs/recent?limit=${DATA_FETCH_LIMIT}`),
+      getJson("/api/aprs/status"),
       getJson("/api/captures"),
       getJson(`/api/events/recent?limit=${EVENT_FEED_LIMIT}`),
       getJson("/api/system"),
@@ -916,6 +932,7 @@ async function refreshData() {
     state.latestSources = sources;
     state.latestAdsb = adsb;
     state.latestAprs = aprs;
+    state.aprsStatus = aprsStatus || {};
     state.allTimeRecords = records || [];
     $("station").textContent = `${state.station?.name || "RF Node"} ${state.station?.grid || ""}`.trim();
     renderSources(sources);
@@ -924,7 +941,7 @@ async function refreshData() {
     renderAprsTable(aprs);
     renderAdsbTable(adsb);
     renderCaptures(captures);
-    renderOverview({ sources, adsb, aprs, captures, events, system, records: state.allTimeRecords });
+    renderOverview({ sources, adsb, aprs, aprsStatus: state.aprsStatus, captures, events, system, records: state.allTimeRecords });
     state.initialized = true;
   } catch (error) {
     console.error(error);

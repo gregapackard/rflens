@@ -9,22 +9,42 @@ from backend.config import resolve_path, source_config
 from backend.db import get_or_create_source, insert_event, touch_source
 
 
-CALLSIGN_PATTERN = r"(?=[A-Z0-9]{1,6}(?:-\d{1,2})?>)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{1,6}(?:-\d{1,2})?"
+CALLSIGN_PATTERN = r"(?=[A-Z0-9-]*[A-Z])[A-Z0-9]{1,9}(?:-(?:[0-9]|1[0-5]))?"
 PACKET_RE = re.compile(
     rf"^(?P<callsign>{CALLSIGN_PATTERN})>(?P<destination>[^,:\s]+)(?:,[^:]*)?:(?P<body>.*)$",
     re.IGNORECASE,
 )
-BRACKET_PREFIX_RE = re.compile(r"^\[[^\]]+\]\s*")
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
+STATUS_PREFIXES = (
+    "#",
+    "Position,",
+    "Ready to accept",
+    "Now connected",
+    "Check server status",
+)
+STATUS_PHRASES = (
+    "When using APRS",
+    "Dire Wolf",
+    "Direwolf",
+)
 
 
 def normalize_packet_line(line: str) -> str:
-    return BRACKET_PREFIX_RE.sub("", line.strip(), count=1)
+    text = line.strip()
+    if text.startswith("[") and "]" in text:
+        text = text.split("]", 1)[1].strip()
+    return text
+
+
+def status_or_help_line(text: str) -> bool:
+    return any(text.startswith(prefix) for prefix in STATUS_PREFIXES) or any(phrase in text for phrase in STATUS_PHRASES)
 
 
 def packet_like(line: str) -> bool:
     text = normalize_packet_line(line)
     if len(text) < 6:
+        return False
+    if status_or_help_line(text):
         return False
     return PACKET_RE.match(text) is not None
 

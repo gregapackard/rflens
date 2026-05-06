@@ -9,14 +9,13 @@ from backend.config import resolve_path, source_config
 from backend.db import get_or_create_source, insert_event, touch_source
 
 
-CALLSIGN_PATTERN = r"(?=[A-Z0-9-]*[A-Z])[A-Z0-9]{1,9}(?:-(?:[0-9]|1[0-5]))?"
-PACKET_RE = re.compile(
-    rf"^(?P<callsign>{CALLSIGN_PATTERN})>(?P<destination>[^,:\s]+)(?:,[^:]*)?:(?P<body>.*)$",
-    re.IGNORECASE,
-)
+CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
 STATUS_PREFIXES = (
     "#",
+    "ERROR!!!",
+    "Use of",
+    "Digipeater ",
     "Position,",
     "Ready to accept",
     "Now connected",
@@ -24,6 +23,7 @@ STATUS_PREFIXES = (
 )
 STATUS_PHRASES = (
     "When using APRS",
+    "audio level",
     "Dire Wolf",
     "Direwolf",
 )
@@ -40,13 +40,29 @@ def status_or_help_line(text: str) -> bool:
     return any(text.startswith(prefix) for prefix in STATUS_PREFIXES) or any(phrase in text for phrase in STATUS_PHRASES)
 
 
+def parse_packet_header(text: str) -> tuple[str, str] | None:
+    if ">" not in text or ":" not in text:
+        return None
+    header, _payload = text.split(":", 1)
+    if ">" not in header:
+        return None
+    source, path = header.split(">", 1)
+    source = source.strip()
+    destination = path.split(",", 1)[0].strip()
+    if not source or not destination:
+        return None
+    if not CALLSIGN_RE.match(source):
+        return None
+    return source.upper(), destination.upper()
+
+
 def packet_like(line: str) -> bool:
     text = normalize_packet_line(line)
     if len(text) < 6:
         return False
     if status_or_help_line(text):
         return False
-    return PACKET_RE.match(text) is not None
+    return parse_packet_header(text) is not None
 
 
 def parse_position(text: str) -> tuple[float | None, float | None]:
@@ -65,9 +81,8 @@ def parse_position(text: str) -> tuple[float | None, float | None]:
 
 def parse_line(line: str) -> dict[str, str | float | None]:
     text = normalize_packet_line(line)
-    match = PACKET_RE.match(text)
-    callsign = match.group("callsign").upper() if match else None
-    destination = match.group("destination").upper() if match else None
+    parsed_header = parse_packet_header(text)
+    callsign, destination = parsed_header if parsed_header else (None, None)
     lat, lon = parse_position(text)
     return {
         "callsign": callsign,

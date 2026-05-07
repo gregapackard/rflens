@@ -862,6 +862,41 @@ def fetch_records() -> list[dict[str, Any]]:
     )
 
 
+def update_recent_aprs_gate_confirmation(
+    *,
+    callsign: str,
+    gated_by: str | None,
+    confirmed_gated_by_me: bool,
+    raw_text: str,
+) -> None:
+    if not callsign:
+        return
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, metadata_json
+            FROM events
+            WHERE event_type = 'aprs_packet'
+              AND callsign = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            (callsign,),
+        ).fetchone()
+        if not row:
+            return
+        metadata = parse_metadata_payload(row["metadata_json"])
+        metadata["confirmed_gated_by_me"] = confirmed_gated_by_me
+        metadata["gated_by"] = gated_by
+        metadata["gated_by_other"] = bool(gated_by and not confirmed_gated_by_me)
+        metadata["likely_gated_by_me"] = False
+        metadata["gate_confirmation_source"] = raw_text
+        conn.execute(
+            "UPDATE events SET metadata_json = ? WHERE id = ?",
+            (json.dumps(metadata, separators=(",", ":"), default=str), row["id"]),
+        )
+
+
 def record_by_type(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(record.get("record_type")): record for record in records}
 
@@ -874,6 +909,8 @@ def station_type_label(value: Any) -> str:
         "mobile digipeater": "mobile digipeater",
         "digipeater": "digipeater",
         "aircraft": "small aircraft tracker",
+        "packet node": "packet node",
+        "ax25 node": "AX.25 node",
     }
     return labels.get(text, text or "station")
 
@@ -960,6 +997,9 @@ def enriched_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     via = preferred_heard_via(enriched)
     if via:
         enriched["preferred_heard_via"] = via
+    if enriched.get("heard_over_rf") is True:
+        enriched["aprs_is_connected_at_heard"] = bool(enriched.get("gate_eligible"))
+        enriched["gate_confirmed"] = enriched.get("confirmed_gated_by_me") is True
     return enriched
 
 
@@ -975,6 +1015,19 @@ def top_count(items: list[str]) -> str | None:
     return f"{key} ({count} packets)"
 
 
+def gate_status_phrase(metadata: dict[str, Any]) -> str | None:
+    gated_by = metadata.get("gated_by")
+    if metadata.get("confirmed_gated_by_me") is True:
+        return f"confirmed gated by {gated_by or 'my iGate'}"
+    if metadata.get("gated_by_other") is True and gated_by:
+        return f"APRS-IS evidence shows it was gated by {gated_by}"
+    if metadata.get("gate_eligible") is True:
+        return "APRS-IS was connected and verified, so it was eligible to be gated; RF Lens has not confirmed APRS-IS accepted it from KF8GBU-10"
+    if metadata.get("heard_over_rf") is True:
+        return "heard locally over RF; APRS-IS gate not confirmed"
+    return None
+
+
 def aprs_observation_score(event: dict[str, Any], metadata: dict[str, Any]) -> tuple[int, str]:
     score = 0
     if as_float(metadata.get("distance_miles")) is not None or valid_coord(event.get("lat") or metadata.get("lat"), event.get("lon") or metadata.get("lon")):
@@ -984,6 +1037,8 @@ def aprs_observation_score(event: dict[str, Any], metadata: dict[str, Any]) -> t
         score += 75
     elif station_type in {"digipeater", "igate", "aircraft", "mobile_digipeater"}:
         score += 60
+    elif station_type in {"packet_node", "ax25_node"}:
+        score -= 120
     elif station_type != "station":
         score += 35
     if as_float(metadata.get("audio_level")) is not None:
@@ -991,7 +1046,7 @@ def aprs_observation_score(event: dict[str, Any], metadata: dict[str, Any]) -> t
     if preferred_heard_via(metadata) and preferred_heard_via(metadata) != "direct":
         score += 15
     destination = str(metadata.get("destination") or "").upper()
-    if destination == "ID":
+    if destination in {"ID", "NODES"} or metadata.get("is_packet_node") is True:
         score -= 90
     if score == 0:
         score -= 20
@@ -1018,6 +1073,53 @@ def prioritized_aprs_events(events_with_metadata: list[tuple[dict[str, Any], dic
         reverse=True,
     )
     return [event for event, _metadata, _score in ordered[:limit]]
+
+
+def useful_latest_aprs_event(events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    useful = [
+        (event, metadata, aprs_observation_score(event, metadata))
+        for event, metadata in events_with_metadata
+        if str(metadata.get("station_type") or "") not in {"packet_node", "ax25_node"}
+        and str(metadata.get("destination") or "").upper() not in {"ID", "NODES"}
+        and metadata.get("is_packet_node") is not True
+    ]
+    if not useful:
+        return events_with_metadata[0] if events_with_metadata else (None, {})
+    ordered = sorted(
+        useful,
+        key=lambda item: (
+            item[2][0],
+            str(item[0].get("timestamp") or ""),
+        ),
+        reverse=True,
+    )
+    return ordered[0][0], ordered[0][1]
+
+
+def aprs_gate_stats(events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]]) -> dict[str, Any]:
+    heard_rf = [item for item in events_with_metadata if item[1].get("heard_over_rf") is True]
+    gate_eligible = [item for item in heard_rf if item[1].get("gate_eligible") is True]
+    confirmed_me = [item for item in heard_rf if item[1].get("confirmed_gated_by_me") is True]
+    gated_other = [item for item in heard_rf if item[1].get("gated_by_other") is True]
+    via_real_digi = [
+        item for item in heard_rf
+        if item[1].get("preferred_heard_via")
+        and item[1].get("preferred_heard_via") != "direct"
+    ]
+    competing_likely = len(confirmed_me) == 0 and len(via_real_digi) >= 3
+    return {
+        "heard_over_rf": len(heard_rf),
+        "gate_eligible": len(gate_eligible),
+        "gate_confirmed": len(confirmed_me),
+        "confirmed_gated_by_kf8gbu_10": len(confirmed_me),
+        "gated_by_other": len(gated_other),
+        "likely_competing_igates_or_digipeaters": competing_likely,
+        "language": (
+            "Likely competing iGates/digipeaters nearby"
+            if competing_likely
+            else "No competing iGate evidence yet"
+        ),
+    }
 
 
 def aprs_event_sentence(event: dict[str, Any]) -> str:
@@ -1048,6 +1150,9 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
     sentence = ", ".join(parts)
     if station_type and station_type != "station":
         sentence += f", and it appears to be a {station_type}"
+    gate_phrase = gate_status_phrase(metadata)
+    if gate_phrase:
+        sentence += f"; {gate_phrase}"
     return sentence + "."
 
 
@@ -1088,6 +1193,8 @@ def fetch_insights() -> dict[str, Any]:
     aprs_with_metadata = [(event, enriched_metadata(parse_metadata_payload(event.get("metadata_json")))) for event in aprs_recent]
     aprs_today_with_metadata = [(event, enriched_metadata(parse_metadata_payload(event.get("metadata_json")))) for event in aprs_today]
     adsb_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in adsb_today]
+    gate_stats = aprs_gate_stats(aprs_with_metadata)
+    gate_stats_today = aprs_gate_stats(aprs_today_with_metadata)
 
     farthest_aprs = max(
         ((event, metadata, as_float(metadata.get("distance_miles"))) for event, metadata in aprs_with_metadata),
@@ -1109,8 +1216,7 @@ def fetch_insights() -> dict[str, Any]:
         key=lambda item: item[2] if item[2] is not None else -1,
         default=(None, {}, None),
     )
-    latest_aprs = aprs_recent[0] if aprs_recent else None
-    latest_metadata = parse_metadata_payload(latest_aprs.get("metadata_json")) if latest_aprs else {}
+    latest_aprs, latest_metadata = useful_latest_aprs_event(aprs_with_metadata)
     top_digi = top_count([
         str(metadata.get("preferred_heard_via") or "")
         for _event, metadata in aprs_with_metadata
@@ -1135,7 +1241,7 @@ def fetch_insights() -> dict[str, Any]:
 
     summary: list[str] = []
     if aprs_status.get("aprs_is_connected") and aprs_status.get("aprs_is_verified"):
-        summary.append("Your APRS iGate is online and verified with APRS-IS.")
+        summary.append("Your iGate is connected and verified with APRS-IS.")
     elif aprs_status.get("online"):
         summary.append("Your APRS receiver is online, but APRS-IS verification is not confirmed yet.")
     if aprs_recent:
@@ -1147,6 +1253,8 @@ def fetch_insights() -> dict[str, Any]:
         via = preferred_heard_via(latest_metadata)
         via_text = f" via {via}" if via and via != "direct" else " directly" if via == "direct" else ""
         summary.append(f"Most recent RF APRS packet was {latest_aprs.get('callsign')}{via_text}.")
+    if gate_stats["heard_over_rf"] and gate_stats["gate_confirmed"] == 0 and aprs_status.get("aprs_is_connected") and aprs_status.get("aprs_is_verified"):
+        summary.append("You are hearing RF packets, but RF Lens has not yet confirmed a packet accepted by APRS-IS as gated by KF8GBU-10.")
     if best_audio[0] and best_audio[2] is not None:
         summary.append(f"Best APRS audio recently was {format_audio(best_audio[2], best_audio[1].get('audio_quality'))}.")
     if not summary:
@@ -1188,6 +1296,10 @@ def fetch_insights() -> dict[str, Any]:
                 else None
             ),
             "most_common_digipeater_path_today": top_digi_today,
+            "gate_eligible_today": gate_stats_today["gate_eligible"],
+            "gate_confirmed_today": gate_stats_today["gate_confirmed"],
+            "confirmed_gated_by_kf8gbu_10_today": gate_stats_today["confirmed_gated_by_kf8gbu_10"],
+            "gate_competition_note_today": gate_stats_today["language"] if gate_stats_today["likely_competing_igates_or_digipeaters"] else None,
             "adsb_max_range_today": format_distance_nmi(adsb_range_today),
             "adsb_highest_altitude_today": format_feet(adsb_altitude_today),
             "adsb_strongest_signal_today": format_db(adsb_rssi_today),
@@ -1218,6 +1330,7 @@ def fetch_insights() -> dict[str, Any]:
                 ),
                 "top_digipeater": top_digi,
             },
+            "gate": gate_stats,
         },
         "adsb": {
             "plain_english": adsb_plain,

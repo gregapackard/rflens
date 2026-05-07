@@ -15,6 +15,7 @@ from backend.db import (
     insert_event,
     reset_aprs_status,
     touch_source,
+    update_recent_aprs_gate_confirmation,
     update_aprs_status,
     utc_now,
 )
@@ -34,6 +35,8 @@ FREQUENCY_RE = re.compile(r"(?<!\d)(1[0-9]{2}\.\d{3})\s*MHz", re.IGNORECASE)
 TONE_RE = re.compile(r"\bT(?:one)?\s*([0-9]{2,3}(?:\.[0-9])?)\b", re.IGNORECASE)
 OFFSET_RE = re.compile(r"(?<!\d)([+-]\d{3,4})(?!\d)")
 AIRCRAFT_SOURCE_RE = re.compile(r"^N[0-9]{1,5}[A-Z]{0,2}(?:-\d{1,2})?$", re.IGNORECASE)
+WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
+Q_CONSTRUCT_RE = re.compile(r",qA[A-Z],([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)", re.IGNORECASE)
 STATUS_PREFIXES = (
     "#",
     "ERROR!!!",
@@ -101,6 +104,28 @@ def parse_igate_status(text: str) -> dict[str, Any]:
     if server_match:
         fields["aprs_is_server"] = server_match.group(1)
     return fields
+
+
+def parse_gate_confirmation(prefix: str | None, text: str) -> dict[str, Any] | None:
+    parsed_header = parse_packet_header(text)
+    if not parsed_header:
+        return None
+    callsign, _destination, _path = parsed_header
+    q_match = Q_CONSTRUCT_RE.search(text)
+    if q_match:
+        gated_by = q_match.group(1).upper()
+        return {
+            "callsign": callsign,
+            "gated_by": gated_by,
+            "confirmed_gated_by_me": gated_by == APRS_CALLSIGN,
+        }
+    if prefix and prefix.lower() == "ig>tx":
+        return {
+            "callsign": callsign,
+            "gated_by": APRS_CALLSIGN,
+            "confirmed_gated_by_me": True,
+        }
+    return None
 
 
 def aprs_is_status_line(text: str) -> bool:
@@ -179,6 +204,27 @@ def last_used_digipeater(path: list[str]) -> str | None:
     return used[-1].rstrip("*") if used else None
 
 
+def clean_path_token(value: Any) -> str:
+    return str(value or "").strip().upper().rstrip("*")
+
+
+def is_wide_alias(value: Any) -> bool:
+    return bool(WIDE_ALIAS_RE.match(str(value or "").strip()))
+
+
+def preferred_heard_via(path: list[str], heard_via: str | None, was_direct: bool) -> str | None:
+    raw = clean_path_token(heard_via)
+    if not raw:
+        return "direct" if was_direct else None
+    if not is_wide_alias(raw):
+        return raw
+    for token in reversed(path):
+        clean = clean_path_token(token)
+        if clean and clean != raw and not is_wide_alias(clean):
+            return clean
+    return raw
+
+
 def valid_coord(lat: Any, lon: Any) -> bool:
     try:
         latitude = float(lat)
@@ -248,6 +294,8 @@ def infer_station_type(source: str | None, destination: str | None, payload: str
     text = f"{payload} {comment} {raw_text}".lower()
     if (destination or "").upper() == "NODES":
         return "ax25_node"
+    if (destination or "").upper() == "ID" or "network node" in text:
+        return "packet_node"
     if payload.startswith(";") and FREQUENCY_RE.search(payload):
         return "repeater_object"
     if "digi igate" in text or "i-gate" in text or "igate" in text:
@@ -259,16 +307,24 @@ def infer_station_type(source: str | None, destination: str | None, payload: str
     return "station"
 
 
-def enrich_packet(line: str, last_audio: dict[str, Any] | None, station_cfg: dict[str, Any]) -> dict[str, Any]:
+def enrich_packet(
+    line: str,
+    last_audio: dict[str, Any] | None,
+    station_cfg: dict[str, Any],
+    gate_eligible: bool,
+) -> dict[str, Any]:
     prefix, text = split_prefix(line)
     parsed_header = parse_packet_header(text)
     callsign, destination, path_raw = parsed_header if parsed_header else (None, None, None)
     path = parse_path(path_raw)
     used_digi = last_used_digipeater(path)
+    heard_via_raw = used_digi or "direct"
+    preferred_via = preferred_heard_via(path, used_digi, not bool(used_digi))
     payload = packet_payload(text)
     comment = packet_comment(payload)
     lat, lon = parse_position(text)
     station_type = infer_station_type(callsign, destination, payload, comment, text)
+    heard_over_rf = bool(prefix and RF_PREFIX_RE.match(prefix))
     metadata: dict[str, Any] = {
         "callsign": callsign,
         "source_callsign": callsign,
@@ -278,8 +334,14 @@ def enrich_packet(line: str, last_audio: dict[str, Any] | None, station_cfg: dic
         "was_digipeated": bool(used_digi),
         "was_direct": not bool(used_digi),
         "last_used_digipeater": used_digi,
-        "heard_via": used_digi or "direct",
-        "heard_transport": "rf" if prefix and RF_PREFIX_RE.match(prefix) else "unknown",
+        "heard_via": heard_via_raw,
+        "heard_via_raw": heard_via_raw,
+        "preferred_heard_via": preferred_via,
+        "heard_transport": "rf" if heard_over_rf else "unknown",
+        "heard_over_rf": heard_over_rf,
+        "gate_eligible": bool(heard_over_rf and gate_eligible),
+        "likely_gated_by_me": bool(heard_over_rf and gate_eligible),
+        "confirmed_gated_by_me": False,
         "rf_channel_prefix": prefix if prefix and RF_PREFIX_RE.match(prefix) else None,
         "station_type": station_type,
         "payload": payload,
@@ -288,6 +350,9 @@ def enrich_packet(line: str, last_audio: dict[str, Any] | None, station_cfg: dic
         "lon": lon,
         "line": text,
     }
+    if station_type in {"packet_node", "ax25_node"}:
+        metadata["is_packet_node"] = True
+        metadata["importance"] = "low"
     metadata.update(parse_repeater_object(payload))
     metadata.update(range_and_bearing(station_cfg.get("lat"), station_cfg.get("lon"), lat, lon))
     if last_audio:
@@ -401,6 +466,8 @@ def run_forever() -> None:
     ignored_status_lines = 0
     best_audio_level: int | None = None
     last_audio: dict[str, Any] | None = None
+    aprs_is_connected = False
+    aprs_is_verified = False
     reset_aprs_status(APRS_CALLSIGN)
     hydrate_aprs_status_from_recent_events(APRS_CALLSIGN)
 
@@ -411,7 +478,14 @@ def run_forever() -> None:
         prefix, text = split_prefix(line)
         if ignored_prefix(prefix):
             ignored_igate_lines += 1
-            update_ignored_igate(ignored_igate_lines, text)
+            confirmation = parse_gate_confirmation(prefix, text)
+            if confirmation:
+                update_recent_aprs_gate_confirmation(raw_text=text, **confirmation)
+            fields = parse_igate_status(text)
+            aprs_is_connected = bool(fields.get("aprs_is_connected", aprs_is_connected))
+            aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
+            fields["ignored_igate_lines"] = ignored_igate_lines
+            update_aprs_status(**fields)
             touch_source(source_id, "online")
             continue
         audio_status = parse_audio_line(text)
@@ -429,6 +503,8 @@ def run_forever() -> None:
             ignored_status_lines += 1
             if aprs_is_status_line(text):
                 fields = parse_igate_status(text)
+                aprs_is_connected = bool(fields.get("aprs_is_connected", aprs_is_connected))
+                aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
                 fields["ignored_status_lines"] = ignored_status_lines
                 update_aprs_status(**fields)
             else:
@@ -437,7 +513,7 @@ def run_forever() -> None:
             continue
         if not packet_like(line):
             continue
-        parsed = enrich_packet(line, last_audio, station_cfg)
+        parsed = enrich_packet(line, last_audio, station_cfg, aprs_is_connected and aprs_is_verified)
         packet_line = str(parsed.get("line") or "")
         if duplicate_packet(packet_line, seen_packets, time.time()):
             continue

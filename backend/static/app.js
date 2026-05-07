@@ -268,6 +268,14 @@ function aprsAudioLabel(metadata) {
   return metadata.audio_quality ? `${level} (${metadata.audio_quality})` : String(level);
 }
 
+function aprsGateLabel(metadata) {
+  if (metadata.confirmed_gated_by_me === true) return `gated by ${metadata.gated_by || "me"}`;
+  if (metadata.gated_by_other === true && metadata.gated_by) return `gated by ${metadata.gated_by}`;
+  if (metadata.gate_eligible === true) return "gate eligible";
+  if (metadata.heard_over_rf === true) return "RF only";
+  return "";
+}
+
 function aprsPacketLabels(event) {
   const metadata = aprsMetadata(event);
   return [
@@ -276,6 +284,7 @@ function aprsPacketLabels(event) {
     aprsViaLabel(metadata),
     metadata.station_type ? titleCase(metadata.station_type) : "",
     aprsAudioLabel(metadata) ? `audio ${aprsAudioLabel(metadata)}` : "",
+    aprsGateLabel(metadata),
     validCoord(event.lat ?? metadata.lat, event.lon ?? metadata.lon) ? "position" : "",
   ].filter(Boolean);
 }
@@ -624,6 +633,10 @@ function renderInsights(insights = {}) {
   setText("insights-daily-aprs-farthest", fallbackText(daily.farthest_aprs_station_today));
   setText("insights-daily-aprs-audio", fallbackText(daily.best_aprs_audio_today));
   setText("insights-daily-aprs-digi", fallbackText(daily.most_common_digipeater_path_today));
+  setText("insights-daily-gate-eligible", fallbackText(daily.gate_eligible_today));
+  setText("insights-daily-gate-confirmed", fallbackText(daily.gate_confirmed_today));
+  setText("insights-daily-gate-me", fallbackText(daily.confirmed_gated_by_kf8gbu_10_today));
+  setText("insights-daily-gate-competition", fallbackText(daily.gate_competition_note_today));
   setText("insights-daily-adsb-range", fallbackText(daily.adsb_max_range_today));
   setText("insights-daily-adsb-altitude", fallbackText(daily.adsb_highest_altitude_today));
   setText("insights-daily-adsb-signal", fallbackText(daily.adsb_strongest_signal_today));

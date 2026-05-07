@@ -12,6 +12,7 @@ const state = {
   latestAdsb: [],
   latestAprs: [],
   aprsStatus: {},
+  insights: {},
   allTimeRecords: [],
   records: {
     initialized: false,
@@ -555,6 +556,34 @@ function renderAprsTable(events) {
   setHtml("events-aprs-table", state.eventFilters.aprs ? html : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
 }
 
+function fallbackText(value) {
+  return hasValue(value) ? value : "No data yet";
+}
+
+function renderInsights(insights = {}) {
+  const summary = Array.isArray(insights.summary) ? insights.summary : [];
+  setHtml("insights-summary", (summary.length ? summary : ["RF Lens is waiting for fresh RF observations."]).slice(0, 6).map((line) => `
+    <article class="insight-card">
+      <p>${esc(line)}</p>
+    </article>
+  `).join(""));
+
+  const daily = insights.daily || {};
+  setText("insights-daily-aprs-packets", fallbackText(daily.aprs_packets_heard_today));
+  setText("insights-daily-aprs-stations", fallbackText(daily.unique_aprs_stations_heard_today));
+  setText("insights-daily-aprs-farthest", fallbackText(daily.farthest_aprs_station_today));
+  setText("insights-daily-aprs-audio", fallbackText(daily.best_aprs_audio_today));
+  setText("insights-daily-aprs-digi", fallbackText(daily.most_common_digipeater_path_today));
+  setText("insights-daily-adsb-range", fallbackText(daily.adsb_max_range_today));
+  setText("insights-daily-adsb-altitude", fallbackText(daily.adsb_highest_altitude_today));
+  setText("insights-daily-adsb-signal", fallbackText(daily.adsb_strongest_signal_today));
+
+  const aprsLines = insights.aprs?.plain_english || [];
+  const adsbLines = insights.adsb?.plain_english || [];
+  setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 8).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No APRS insights yet.</p>");
+  setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 5).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No ADS-B insights yet.</p>");
+}
+
 function renderAdsbTable(events) {
   const html = events.map((event) => `
     <tr class="${secondsAgo(event.timestamp) <= 30 ? "recent-row" : ""}">
@@ -905,8 +934,9 @@ function renderRecordsAndAlerts({ sources, adsb, aprs, captures, system }) {
   renderRecordAlerts();
 }
 
-function renderOverview({ sources, adsb, aprs, aprsStatus, captures, events, system, records }) {
+function renderOverview({ sources, adsb, aprs, aprsStatus, captures, events, system, records, insights }) {
   renderGlobalCard({ sources });
+  renderInsights(insights);
   renderAdsbCard(adsb);
   renderAprsCard(aprs, aprsStatus);
   renderSatelliteCard(captures, events);
@@ -1026,13 +1056,14 @@ async function getAprsStatus() {
 
 async function refreshData() {
   try {
-    const [station, adsbUi, sources, adsb, aprs, aprsStatus, captures, events, system, records] = await Promise.all([
+    const [station, adsbUi, sources, adsb, aprs, aprsStatus, insights, captures, events, system, records] = await Promise.all([
       getJson("/api/station"),
       getJson("/api/adsb/ui"),
       getJson("/api/sources"),
       getJson(`/api/adsb/recent?limit=${DATA_FETCH_LIMIT}`),
       getJson(`/api/aprs/recent?limit=${DATA_FETCH_LIMIT}`),
       getAprsStatus(),
+      getJson("/api/insights"),
       getJson("/api/captures"),
       getJson(`/api/events/recent?limit=${EVENT_FEED_LIMIT}`),
       getJson("/api/system"),
@@ -1045,6 +1076,7 @@ async function refreshData() {
     state.latestAdsb = adsb;
     state.latestAprs = aprs;
     state.aprsStatus = aprsStatus || {};
+    state.insights = insights || {};
     state.allTimeRecords = records || [];
     $("station").textContent = `${state.station?.name || "RF Node"} ${state.station?.grid || ""}`.trim();
     renderSources(sources);
@@ -1053,7 +1085,7 @@ async function refreshData() {
     renderAprsTable(aprs);
     renderAdsbTable(adsb);
     renderCaptures(captures);
-    renderOverview({ sources, adsb, aprs, aprsStatus: state.aprsStatus, captures, events, system, records: state.allTimeRecords });
+    renderOverview({ sources, adsb, aprs, aprsStatus: state.aprsStatus, captures, events, system, records: state.allTimeRecords, insights: state.insights });
     state.initialized = true;
   } catch (error) {
     console.error(error);

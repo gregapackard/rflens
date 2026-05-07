@@ -859,3 +859,278 @@ def fetch_records() -> list[dict[str, Any]]:
         END, label
         """
     )
+
+
+def record_by_type(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(record.get("record_type")): record for record in records}
+
+
+def station_type_label(value: Any) -> str:
+    text = str(value or "station").replace("_", " ").strip().lower()
+    labels = {
+        "igate": "digi/iGate",
+        "repeater object": "repeater object",
+        "mobile digipeater": "mobile digipeater",
+        "digipeater": "digipeater",
+        "aircraft": "small aircraft tracker",
+    }
+    return labels.get(text, text or "station")
+
+
+def format_audio(level: Any, quality: Any = None) -> str | None:
+    number = as_float(level)
+    if number is None:
+        return None
+    return f"{int(number)} ({quality})" if quality else str(int(number))
+
+
+def format_distance_miles(value: Any) -> str | None:
+    miles = as_float(value)
+    if miles is None:
+        return None
+    return f"{miles:.0f} miles"
+
+
+def format_distance_nmi(value: Any) -> str | None:
+    nmi = as_float(value)
+    if nmi is None:
+        return None
+    return f"{nmi:.1f} nmi"
+
+
+def format_feet(value: Any) -> str | None:
+    feet = as_float(value)
+    if feet is None:
+        return None
+    return f"{feet:,.0f} ft"
+
+
+def format_db(value: Any) -> str | None:
+    db = as_float(value)
+    if db is None:
+        return None
+    return f"{db:.1f} dB"
+
+
+def first_number(*values: Any) -> float | None:
+    for value in values:
+        number = as_float(value)
+        if number is not None:
+            return number
+    return None
+
+
+def top_count(items: list[str]) -> str | None:
+    counts: dict[str, int] = {}
+    for item in items:
+        if not item:
+            continue
+        counts[item] = counts.get(item, 0) + 1
+    if not counts:
+        return None
+    key, count = sorted(counts.items(), key=lambda item: item[1], reverse=True)[0]
+    return f"{key} ({count} packets)"
+
+
+def aprs_event_sentence(event: dict[str, Any]) -> str:
+    metadata = parse_metadata_payload(event.get("metadata_json"))
+    callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
+    station_type = station_type_label(metadata.get("station_type"))
+    if metadata.get("station_type") == "repeater_object":
+        parts = [f"I heard {metadata.get('object_name') or callsign} as a repeater object"]
+        if metadata.get("frequency_mhz"):
+            parts.append(f"advertising {float(metadata['frequency_mhz']):.3f} MHz")
+        if metadata.get("tone_hz"):
+            parts.append(f"with PL {metadata['tone_hz']}")
+        return " ".join(parts) + "."
+
+    transport = str(metadata.get("heard_transport") or "RF").upper()
+    parts = [f"I heard {callsign} over {transport}"]
+    distance = format_distance_miles(metadata.get("distance_miles"))
+    if distance:
+        parts.append(f"{distance} away")
+    heard_via = metadata.get("heard_via")
+    if heard_via and heard_via != "direct":
+        parts.append(f"via {heard_via}")
+    elif metadata.get("was_direct") is True or heard_via == "direct":
+        parts.append("directly")
+    audio = format_audio(metadata.get("audio_level"), metadata.get("audio_quality"))
+    if audio:
+        parts.append(f"audio {audio}")
+    sentence = ", ".join(parts)
+    if station_type and station_type != "station":
+        sentence += f", and it appears to be a {station_type}"
+    return sentence + "."
+
+
+def fetch_insights() -> dict[str, Any]:
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    aprs_status = fetch_aprs_status()
+    records = record_by_type(fetch_records())
+    aprs_recent = fetch_all(
+        """
+        SELECT *
+        FROM events
+        WHERE event_type = 'aprs_packet'
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 250
+        """
+    )
+    aprs_today = fetch_all(
+        """
+        SELECT *
+        FROM events
+        WHERE event_type = 'aprs_packet'
+          AND timestamp >= ?
+        ORDER BY timestamp DESC, id DESC
+        """,
+        (today_start,),
+    )
+    adsb_today = fetch_all(
+        """
+        SELECT *
+        FROM events
+        WHERE event_type = 'adsb_aircraft'
+          AND timestamp >= ?
+        ORDER BY timestamp DESC, id DESC
+        """,
+        (today_start,),
+    )
+
+    aprs_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in aprs_recent]
+    aprs_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in aprs_today]
+    adsb_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in adsb_today]
+
+    farthest_aprs = max(
+        ((event, metadata, as_float(metadata.get("distance_miles"))) for event, metadata in aprs_with_metadata),
+        key=lambda item: item[2] if item[2] is not None else -1,
+        default=(None, {}, None),
+    )
+    farthest_today = max(
+        ((event, metadata, as_float(metadata.get("distance_miles"))) for event, metadata in aprs_today_with_metadata),
+        key=lambda item: item[2] if item[2] is not None else -1,
+        default=(None, {}, None),
+    )
+    best_audio = max(
+        ((event, metadata, as_float(metadata.get("audio_level"))) for event, metadata in aprs_with_metadata),
+        key=lambda item: item[2] if item[2] is not None else -1,
+        default=(None, {}, None),
+    )
+    best_audio_today = max(
+        ((event, metadata, as_float(metadata.get("audio_level"))) for event, metadata in aprs_today_with_metadata),
+        key=lambda item: item[2] if item[2] is not None else -1,
+        default=(None, {}, None),
+    )
+    latest_aprs = aprs_recent[0] if aprs_recent else None
+    latest_metadata = parse_metadata_payload(latest_aprs.get("metadata_json")) if latest_aprs else {}
+    top_digi = top_count([
+        str(metadata.get("heard_via") or "")
+        for _event, metadata in aprs_with_metadata
+        if metadata.get("heard_via") and metadata.get("heard_via") != "direct"
+    ])
+    top_digi_today = top_count([
+        str(metadata.get("heard_via") or "")
+        for _event, metadata in aprs_today_with_metadata
+        if metadata.get("heard_via") and metadata.get("heard_via") != "direct"
+    ])
+
+    adsb_ranges = [value for value in (as_float(metadata.get("r_dst")) for _event, metadata in adsb_today_with_metadata) if value is not None]
+    adsb_altitudes = [
+        value
+        for value in (first_number(event.get("altitude"), metadata.get("alt_baro")) for event, metadata in adsb_today_with_metadata)
+        if value is not None
+    ]
+    adsb_rssis = [value for value in (as_float(metadata.get("rssi")) for _event, metadata in adsb_today_with_metadata) if value is not None]
+    adsb_range_today = max(adsb_ranges, default=None)
+    adsb_altitude_today = max(adsb_altitudes, default=None)
+    adsb_rssi_today = max(adsb_rssis, default=None)
+
+    summary: list[str] = []
+    if aprs_status.get("aprs_is_connected") and aprs_status.get("aprs_is_verified"):
+        summary.append("Your APRS iGate is online and verified with APRS-IS.")
+    elif aprs_status.get("online"):
+        summary.append("Your APRS receiver is online, but APRS-IS verification is not confirmed yet.")
+    if aprs_recent:
+        unique_recent = len({event.get("callsign") for event in aprs_recent if event.get("callsign")})
+        summary.append(f"You heard {unique_recent} APRS stations recently over RF.")
+    if farthest_aprs[0] and farthest_aprs[2] is not None:
+        summary.append(f"The farthest APRS station heard was {farthest_aprs[0].get('callsign')} at approximately {farthest_aprs[2]:.0f} miles.")
+    if latest_aprs:
+        via = latest_metadata.get("heard_via")
+        via_text = f" via {via}" if via and via != "direct" else " directly" if via == "direct" else ""
+        summary.append(f"Most recent RF APRS packet was {latest_aprs.get('callsign')}{via_text}.")
+    if best_audio[0] and best_audio[2] is not None:
+        summary.append(f"Best APRS audio recently was {format_audio(best_audio[2], best_audio[1].get('audio_quality'))}.")
+    if not summary:
+        summary.append("RF Lens is waiting for fresh APRS or ADS-B observations to summarize.")
+
+    aprs_plain = [aprs_event_sentence(event) for event in aprs_recent[:8]]
+    adsb_plain: list[str] = []
+    if records.get("adsb_max_range"):
+        adsb_plain.append(f"Your farthest ADS-B aircraft record is {records['adsb_max_range'].get('value_text')}.")
+    if records.get("adsb_highest_altitude"):
+        adsb_plain.append(f"Highest valid aircraft altitude recorded is {records['adsb_highest_altitude'].get('value_text')}.")
+    if records.get("adsb_strongest_signal"):
+        adsb_plain.append(f"Strongest ADS-B signal recorded is {records['adsb_strongest_signal'].get('value_text')}.")
+    if not adsb_plain:
+        adsb_plain.append("ADS-B records will appear here once aircraft with valid range, altitude, or signal data are stored.")
+    for line in adsb_plain:
+        if len(summary) >= 6:
+            break
+        if line not in summary:
+            summary.append(line)
+    if len(summary) < 3 and not aprs_recent:
+        summary.append("No stored APRS RF packets are available for the insight layer yet.")
+    if len(summary) < 3 and not adsb_today:
+        summary.append("No ADS-B aircraft events have been stored today yet.")
+
+    return {
+        "summary": summary[:6],
+        "daily": {
+            "aprs_packets_heard_today": len(aprs_today),
+            "unique_aprs_stations_heard_today": len({event.get("callsign") for event in aprs_today if event.get("callsign")}),
+            "farthest_aprs_station_today": (
+                f"{farthest_today[0].get('callsign')} at approximately {farthest_today[2]:.0f} miles"
+                if farthest_today[0] and farthest_today[2] is not None
+                else None
+            ),
+            "best_aprs_audio_today": (
+                format_audio(best_audio_today[2], best_audio_today[1].get("audio_quality"))
+                if best_audio_today[0] and best_audio_today[2] is not None
+                else None
+            ),
+            "most_common_digipeater_path_today": top_digi_today,
+            "adsb_max_range_today": format_distance_nmi(adsb_range_today),
+            "adsb_highest_altitude_today": format_feet(adsb_altitude_today),
+            "adsb_strongest_signal_today": format_db(adsb_rssi_today),
+        },
+        "aprs": {
+            "plain_english": aprs_plain,
+            "notable": {
+                "farthest_heard": (
+                    f"{farthest_aprs[0].get('callsign')} at approximately {farthest_aprs[2]:.0f} miles"
+                    if farthest_aprs[0] and farthest_aprs[2] is not None
+                    else None
+                ),
+                "best_audio": (
+                    f"{best_audio[0].get('callsign')} with audio {format_audio(best_audio[2], best_audio[1].get('audio_quality'))}"
+                    if best_audio[0] and best_audio[2] is not None
+                    else None
+                ),
+                "latest_rf": (
+                    f"{latest_aprs.get('callsign')} via {latest_metadata.get('heard_via')}"
+                    if latest_aprs and latest_metadata.get("heard_via")
+                    else latest_aprs.get("callsign") if latest_aprs else None
+                ),
+                "top_digipeater": top_digi,
+            },
+        },
+        "adsb": {
+            "plain_english": adsb_plain,
+            "today": {
+                "max_range": format_distance_nmi(adsb_range_today),
+                "highest_altitude": format_feet(adsb_altitude_today),
+                "strongest_signal": format_db(adsb_rssi_today),
+            },
+        },
+    }

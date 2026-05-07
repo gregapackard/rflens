@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import load_config
-from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_records, init_db, insert_event
+from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_insights, fetch_records, init_db, insert_event
 from .models import EventIn
 
 
@@ -98,6 +98,11 @@ def system() -> dict[str, object]:
         },
         "memory": memory,
     }
+
+
+@app.get("/api/insights")
+def insights() -> dict[str, object]:
+    return fetch_insights()
 
 
 @app.get("/api/map/tiles/local")

@@ -227,6 +227,104 @@ dd {
   overflow: hidden;
 }
 
+.insights-panel {
+  display: grid;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 1.15rem;
+  background: rgba(8, 14, 20, 0.36);
+}
+
+.insights-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.insights-head h2 {
+  margin-bottom: 0.3rem;
+  font-size: 1.05rem;
+}
+
+.insights-head p {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.insights-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.insight-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.insight-card {
+  min-width: 0;
+  border: 1px solid rgba(85, 214, 255, 0.25);
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: rgba(85, 214, 255, 0.07);
+}
+
+.insight-card p {
+  color: #e7f2ff;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.insight-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: 0.8rem;
+}
+
+.insight-column {
+  min-width: 0;
+  border: 1px solid rgba(37, 50, 65, 0.78);
+  border-radius: 8px;
+  padding: 0.9rem;
+  background: rgba(17, 24, 33, 0.56);
+}
+
+.insight-column h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.insight-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.insight-list p {
+  border-top: 1px solid rgba(37, 50, 65, 0.7);
+  padding-top: 0.65rem;
+  color: #dce9f7;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.insight-list p:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.insight-daily-list {
+  gap: 0.52rem;
+}
+
+.insight-daily-list div {
+  min-height: 1.55rem;
+  padding-top: 0.52rem;
+}
+
 #tab-adsb.active {
   margin: calc(clamp(1rem, 3vw, 2rem) * -1);
 }
@@ -792,6 +890,11 @@ tr.recent-row td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .insight-card-grid,
+  .insight-columns {
+    grid-template-columns: 1fr;
+  }
+
   .highlight-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -806,6 +909,14 @@ tr.recent-row td {
 
   .tabs {
     top: 7.4rem;
+  }
+
+  .insights-head {
+    flex-direction: column;
+  }
+
+  .insights-actions {
+    justify-content: flex-start;
   }
 
   th,

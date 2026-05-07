@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,10 @@ from .config import get_database_path, load_config
 LOGGER = logging.getLogger(__name__)
 SQLITE_TIMEOUT_SECONDS = 10.0
 SQLITE_BUSY_TIMEOUT_MS = 10000
+INSIGHTS_CACHE_SECONDS = 20.0
 WAL_CONFIGURED_PATHS: set[str] = set()
+INSIGHTS_CACHE: dict[str, Any] | None = None
+INSIGHTS_CACHE_MONOTONIC = 0.0
 
 
 SCHEMA = """
@@ -1405,6 +1409,30 @@ def aprs_audio_sentence(item: tuple[dict[str, Any] | None, dict[str, Any], float
     return f"Best APRS audio: {callsign} decoded at audio {audio}."
 
 
+def format_aprs_motion(metadata: dict[str, Any]) -> list[str]:
+    parts: list[str] = []
+    speed = as_float(metadata.get("speed_mph"))
+    if speed is not None:
+        parts.append(f"moving {speed:.0f} MPH")
+    course = as_float(metadata.get("course_degrees"))
+    if course is not None:
+        parts.append(f"course {course:.0f}°")
+    altitude = as_float(metadata.get("altitude_ft"))
+    if altitude is not None:
+        parts.append(f"altitude {altitude:,.0f} ft")
+    return parts
+
+
+def direwolf_decode_phrase(metadata: dict[str, Any]) -> str | None:
+    decoded_text = str(metadata.get("direwolf_decoded_text") or "")
+    has_decoded_position = metadata.get("decoded_lat") is not None and metadata.get("decoded_lon") is not None
+    if "mic-e" in decoded_text.lower():
+        return "Direwolf decoded its MIC-E position"
+    if has_decoded_position:
+        return "position decoded by Direwolf"
+    return None
+
+
 def aprs_event_sentence(event: dict[str, Any]) -> str:
     metadata = enriched_metadata(parse_metadata_payload(event.get("metadata_json")))
     callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
@@ -1439,12 +1467,16 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
         parts.append(f"via {heard_via}")
     elif metadata.get("was_direct") is True or heard_via == "direct":
         parts.append("directly")
+    parts.extend(format_aprs_motion(metadata))
     audio = format_audio(metadata.get("audio_level"), metadata.get("audio_quality"))
     if audio:
         parts.append(f"audio {audio}")
     sentence = ", ".join(parts)
     if station_type and station_type != "station":
         sentence += f", and it appears to be a {station_type}"
+    decoded_phrase = direwolf_decode_phrase(metadata)
+    if decoded_phrase:
+        sentence += f", and {decoded_phrase}"
     if category == "digipeated_rf":
         sentence += ". This was digipeated, not direct"
     if metadata.get("distance_quality") == "questionable":
@@ -1456,6 +1488,12 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
 
 
 def fetch_insights() -> dict[str, Any]:
+    global INSIGHTS_CACHE, INSIGHTS_CACHE_MONOTONIC
+
+    now_monotonic = time.monotonic()
+    if INSIGHTS_CACHE is not None and now_monotonic - INSIGHTS_CACHE_MONOTONIC < INSIGHTS_CACHE_SECONDS:
+        return INSIGHTS_CACHE
+
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     aprs_status = fetch_aprs_status()
     local_callsign = str(aprs_status.get("callsign") or "KF8GBU-10")
@@ -1599,7 +1637,7 @@ def fetch_insights() -> dict[str, Any]:
     if len(summary) < 3 and not adsb_today:
         summary.append("No ADS-B aircraft events have been stored today yet.")
 
-    return {
+    result = {
         "summary": summary[:6],
         "daily": {
             "aprs_packets_heard_today": len(aprs_today),
@@ -1682,3 +1720,6 @@ def fetch_insights() -> dict[str, Any]:
             },
         },
     }
+    INSIGHTS_CACHE = result
+    INSIGHTS_CACHE_MONOTONIC = now_monotonic
+    return result

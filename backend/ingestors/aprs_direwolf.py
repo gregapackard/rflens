@@ -25,6 +25,7 @@ from backend.db import (
 APRS_CALLSIGN = "KF8GBU-10"
 OWN_CALLSIGNS = {APRS_CALLSIGN}
 DUPLICATE_WINDOW_SECONDS = 60
+SOURCE_TOUCH_INTERVAL_SECONDS = 15
 EARTH_RADIUS_KM = 6371.0088
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
@@ -639,6 +640,14 @@ def update_audio_metrics(level: int, quality: str, best_level: int | None, ignor
     update_aprs_status(**fields)
 
 
+def touch_source_if_due(source_id: int, status: str, last_touch_at: float, *, force: bool = False) -> float:
+    now = time.time()
+    if force or now - last_touch_at >= SOURCE_TOUCH_INTERVAL_SECONDS:
+        touch_source(source_id, status)
+        return now
+    return last_touch_at
+
+
 def update_rf_metrics(total: int, callsigns: set[str], last_callsign: str | None, timestamp: str) -> None:
     update_aprs_status(
         online=True,
@@ -694,13 +703,18 @@ def run_forever() -> None:
     aprs_is_connected = False
     aprs_is_verified = False
     recent_packet: dict[str, Any] | None = None
+    last_source_touch_at = 0.0
     reset_aprs_status(local_callsign)
     hydrated_status = hydrate_aprs_status_from_recent_events(local_callsign)
     rf_packets_heard_total = int(hydrated_status.get("rf_packets_heard_total") or 0)
 
     for line in follow(path):
         if not line:
-            touch_source(source_id, "missing" if not path.exists() else "online")
+            last_source_touch_at = touch_source_if_due(
+                source_id,
+                "missing" if not path.exists() else "online",
+                last_source_touch_at,
+            )
             continue
         prefix, text = split_prefix(line)
         if ignored_prefix(prefix):
@@ -713,7 +727,7 @@ def run_forever() -> None:
             aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
             fields["ignored_igate_lines"] = ignored_igate_lines
             update_aprs_status(**fields)
-            touch_source(source_id, "online")
+            last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         audio_status = parse_audio_line(text)
         if audio_status:
@@ -724,7 +738,7 @@ def run_forever() -> None:
             update_audio_metrics(level, quality, best_audio_level, ignored_status_lines)
             if best_audio_level is None or level > best_audio_level:
                 best_audio_level = level
-            touch_source(source_id, "online")
+            last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         if recent_packet and time.time() - float(recent_packet.get("seen_at") or 0) <= RECENT_PACKET_FOLLOWUP_SECONDS:
             decoded = decoded_followup_metadata(text, recent_packet.get("metadata") or {}, station_cfg)
@@ -741,7 +755,7 @@ def run_forever() -> None:
                         recent_packet["metadata"]["lat"] = update_lat
                     if update_lon is not None:
                         recent_packet["metadata"]["lon"] = update_lon
-                    touch_source(source_id, "online")
+                    last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
                     continue
         if status_or_help_line(text):
             ignored_status_lines += 1
@@ -753,7 +767,7 @@ def run_forever() -> None:
                 update_aprs_status(**fields)
             else:
                 update_ignored_status(ignored_status_lines)
-            touch_source(source_id, "online")
+            last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         if not packet_like(line):
             continue
@@ -777,6 +791,7 @@ def run_forever() -> None:
         }
         packet_timestamp = utc_now()
         rf_packets_heard_total += 1
+        last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
         callsign = str(parsed.get("callsign") or "")
         if callsign:
             seen_callsigns.add(callsign)

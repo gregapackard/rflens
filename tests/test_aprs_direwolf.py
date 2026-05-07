@@ -232,6 +232,26 @@ class AprsDirewolfParserTests(unittest.TestCase):
         self.assertEqual(rows["KD8NVS-1"]["lat"], 40.0)
         self.assertEqual(rows["KD8NVS-1"]["lon"], -83.0)
 
+    def test_aprs_sentence_uses_direwolf_decoded_motion_fields(self):
+        event = {
+            "callsign": "K8LU-9",
+            "metadata_json": (
+                '{"heard_category":"digipeated_rf","heard_over_rf":true,'
+                '"distance_miles":12.4,"preferred_heard_via":"K8QIK-2",'
+                '"speed_mph":46,"course_degrees":92,"altitude_ft":902,'
+                '"decoded_lat":39.967833,"decoded_lon":-82.998833,'
+                '"direwolf_decoded_text":"MIC-E: En Route, 39 58.07 N 082 59.93 W"}'
+            ),
+        }
+
+        sentence = db.aprs_event_sentence(event)
+
+        self.assertIn("moving 46 MPH", sentence)
+        self.assertIn("course 92°", sentence)
+        self.assertIn("altitude 902 ft", sentence)
+        self.assertIn("via K8QIK-2", sentence)
+        self.assertIn("Direwolf decoded its MIC-E position", sentence)
+
 
 if __name__ == "__main__":
     unittest.main()

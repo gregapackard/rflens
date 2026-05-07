@@ -26,8 +26,10 @@ const state = {
   },
 };
 
-const DATA_FETCH_LIMIT = 1000;
-const EVENT_FEED_LIMIT = 50;
+const DATA_FETCH_LIMIT = 250;
+const EVENT_FEED_LIMIT = 30;
+const HEALTH_REFRESH_MS = 5000;
+const DASHBOARD_REFRESH_MS = 30000;
 const LIVE_SECONDS = 60;
 const RECENT_SECONDS = 10 * 60;
 
@@ -286,6 +288,17 @@ function aprsAudioLabel(metadata) {
   return metadata.audio_quality ? `${level} (${metadata.audio_quality})` : String(level);
 }
 
+function aprsMotionLabels(metadata) {
+  const labels = [];
+  const speed = Number(metadata.speed_mph);
+  const course = Number(metadata.course_degrees);
+  const altitude = Number(metadata.altitude_ft);
+  if (Number.isFinite(speed)) labels.push(`${speed.toFixed(0)} MPH`);
+  if (Number.isFinite(course)) labels.push(`course ${course.toFixed(0)}°`);
+  if (Number.isFinite(altitude)) labels.push(`${altitude.toLocaleString()} ft`);
+  return labels;
+}
+
 function aprsGateLabel(metadata) {
   if (metadata.confirmed_gated_by_me === true) return `confirmed gated by ${metadata.gated_by || "local station"}`;
   if (metadata.gated_by_other === true && metadata.gated_by) return `gated by ${metadata.gated_by}`;
@@ -317,6 +330,7 @@ function aprsPacketLabels(event) {
     aprsDistanceLabel(metadata),
     aprsViaLabel(metadata),
     metadata.station_type ? stationTypeLabel(metadata.station_type) : "",
+    ...aprsMotionLabels(metadata),
     aprsAudioLabel(metadata) ? `audio ${aprsAudioLabel(metadata)}` : "",
     aprsGateLabel(metadata),
     aprsDistanceQualityLabel(metadata),
@@ -1236,5 +1250,5 @@ async function refreshData() {
 
 pollHealth();
 refreshData();
-setInterval(pollHealth, 5000);
-setInterval(refreshData, 5000);
+setInterval(pollHealth, HEALTH_REFRESH_MS);
+setInterval(refreshData, DASHBOARD_REFRESH_MS);

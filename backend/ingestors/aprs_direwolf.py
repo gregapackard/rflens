@@ -2,21 +2,38 @@ from __future__ import annotations
 
 import re
 import time
+import math
 from pathlib import Path
 from typing import Any, Iterator
 
 from backend.config import resolve_path, source_config
-from backend.db import get_or_create_source, insert_event, reset_aprs_status, touch_source, update_aprs_status, utc_now
+from backend.config import load_config
+from backend.db import (
+    fetch_recent_aprs_callsigns,
+    get_or_create_source,
+    hydrate_aprs_status_from_recent_events,
+    insert_event,
+    reset_aprs_status,
+    touch_source,
+    update_aprs_status,
+    utc_now,
+)
 
 
 APRS_CALLSIGN = "KF8GBU-10"
 OWN_CALLSIGNS = {APRS_CALLSIGN}
 DUPLICATE_WINDOW_SECONDS = 60
+EARTH_RADIUS_KM = 6371.0088
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
 AUDIO_LEVEL_RE = re.compile(r"audio level\s*=\s*(\d+)\(([^)]*)\)", re.IGNORECASE)
 ESCAPED_BINARY_RE = re.compile(r"<0x[0-9a-f]{2}>", re.IGNORECASE)
 IGATE_SERVER_RE = re.compile(r"Now connected to IGate server\s+(\S+)\s+\([^)]+\)", re.IGNORECASE)
+RF_PREFIX_RE = re.compile(r"^\d+(?:\.\d+)?$")
+FREQUENCY_RE = re.compile(r"(?<!\d)(1[0-9]{2}\.\d{3})\s*MHz", re.IGNORECASE)
+TONE_RE = re.compile(r"\bT(?:one)?\s*([0-9]{2,3}(?:\.[0-9])?)\b", re.IGNORECASE)
+OFFSET_RE = re.compile(r"(?<!\d)([+-]\d{3,4})(?!\d)")
+AIRCRAFT_SOURCE_RE = re.compile(r"^N[0-9]{1,5}[A-Z]{0,2}(?:-\d{1,2})?$", re.IGNORECASE)
 STATUS_PREFIXES = (
     "#",
     "ERROR!!!",
@@ -56,11 +73,19 @@ def status_or_help_line(text: str) -> bool:
     return any(text.startswith(prefix) for prefix in STATUS_PREFIXES) or any(phrase in text for phrase in STATUS_PHRASES)
 
 
-def parse_audio_status(text: str) -> tuple[int, str] | None:
+def parse_audio_line(text: str) -> dict[str, Any] | None:
     match = AUDIO_LEVEL_RE.search(text)
     if not match:
         return None
-    return int(match.group(1)), match.group(2).strip()
+    callsign_match = re.match(r"\s*([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)\s+audio level", text, re.IGNORECASE)
+    bar = text[match.end():].strip()
+    return {
+        "level": int(match.group(1)),
+        "quality": match.group(2).strip(),
+        "bar": bar or None,
+        "source_callsign": callsign_match.group(1).upper() if callsign_match else None,
+        "timestamp": utc_now(),
+    }
 
 
 def parse_igate_status(text: str) -> dict[str, Any]:
@@ -83,7 +108,7 @@ def aprs_is_status_line(text: str) -> bool:
     return "logresp" in lowered or "now connected" in lowered or "connected to" in lowered
 
 
-def parse_packet_header(text: str) -> tuple[str, str] | None:
+def parse_packet_header(text: str) -> tuple[str, str, str] | None:
     if ">" not in text or ":" not in text:
         return None
     header, _payload = text.split(":", 1)
@@ -96,7 +121,7 @@ def parse_packet_header(text: str) -> tuple[str, str] | None:
         return None
     if not CALLSIGN_RE.match(source):
         return None
-    return source.upper(), destination.upper()
+    return source.upper(), destination.upper(), path.strip()
 
 
 def packet_payload(text: str) -> str:
@@ -122,7 +147,7 @@ def packet_like(line: str) -> bool:
     parsed_header = parse_packet_header(text)
     if not parsed_header:
         return False
-    callsign, destination = parsed_header
+    callsign, destination, _path = parsed_header
     if callsign in OWN_CALLSIGNS:
         return False
     return not non_aprs_ax25_packet(text, destination)
@@ -142,10 +167,146 @@ def parse_position(text: str) -> tuple[float | None, float | None]:
     return lat, lon
 
 
+def parse_path(path_raw: str | None) -> list[str]:
+    if not path_raw:
+        return []
+    parts = [part.strip().upper() for part in path_raw.split(",") if part.strip()]
+    return parts[1:] if parts else []
+
+
+def last_used_digipeater(path: list[str]) -> str | None:
+    used = [part for part in path if part.endswith("*")]
+    return used[-1].rstrip("*") if used else None
+
+
+def valid_coord(lat: Any, lon: Any) -> bool:
+    try:
+        latitude = float(lat)
+        longitude = float(lon)
+    except (TypeError, ValueError):
+        return False
+    return abs(latitude) <= 90 and abs(longitude) <= 180 and not (latitude == 0 and longitude == 0)
+
+
+def range_and_bearing(
+    station_lat: float | None,
+    station_lon: float | None,
+    packet_lat: float | None,
+    packet_lon: float | None,
+) -> dict[str, float]:
+    if not valid_coord(station_lat, station_lon) or not valid_coord(packet_lat, packet_lon):
+        return {}
+    phi_a = math.radians(float(station_lat))
+    phi_b = math.radians(float(packet_lat))
+    delta_phi = math.radians(float(packet_lat) - float(station_lat))
+    delta_lambda = math.radians(float(packet_lon) - float(station_lon))
+    haversine = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi_a) * math.cos(phi_b) * math.sin(delta_lambda / 2) ** 2
+    )
+    distance_km = EARTH_RADIUS_KM * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
+    y = math.sin(delta_lambda) * math.cos(phi_b)
+    x = math.cos(phi_a) * math.sin(phi_b) - math.sin(phi_a) * math.cos(phi_b) * math.cos(delta_lambda)
+    return {
+        "distance_km": round(distance_km, 2),
+        "distance_miles": round(distance_km * 0.621371, 2),
+        "distance_nmi": round(distance_km * 0.539957, 2),
+        "bearing_degrees": round((math.degrees(math.atan2(y, x)) + 360) % 360, 1),
+    }
+
+
+def packet_comment(payload: str) -> str:
+    if payload.startswith(";") and len(payload) > 37:
+        return payload[37:].strip()
+    if len(payload) > 19 and payload[0] in "!=/@":
+        return payload[19:].strip()
+    return payload.strip()
+
+
+def parse_repeater_object(payload: str) -> dict[str, Any]:
+    if not payload.startswith(";"):
+        return {}
+    name = payload[1:10].strip()
+    comment = packet_comment(payload)
+    frequency = FREQUENCY_RE.search(payload)
+    tone = TONE_RE.search(payload)
+    offset = OFFSET_RE.search(payload)
+    data: dict[str, Any] = {
+        "object_name": name or None,
+        "comment": comment,
+    }
+    if frequency:
+        data["frequency_mhz"] = float(frequency.group(1))
+    if tone:
+        data["tone_hz"] = float(tone.group(1))
+    if offset:
+        data["offset_khz"] = int(offset.group(1)) * 10
+    return {key: value for key, value in data.items() if value not in (None, "")}
+
+
+def infer_station_type(source: str | None, destination: str | None, payload: str, comment: str, raw_text: str) -> str:
+    text = f"{payload} {comment} {raw_text}".lower()
+    if (destination or "").upper() == "NODES":
+        return "ax25_node"
+    if payload.startswith(";") and FREQUENCY_RE.search(payload):
+        return "repeater_object"
+    if "digi igate" in text or "i-gate" in text or "igate" in text:
+        return "igate"
+    if "digi" in text or "digipeater" in text:
+        return "digipeater"
+    if "small aircraft" in text or (source and AIRCRAFT_SOURCE_RE.match(source)):
+        return "aircraft"
+    return "station"
+
+
+def enrich_packet(line: str, last_audio: dict[str, Any] | None, station_cfg: dict[str, Any]) -> dict[str, Any]:
+    prefix, text = split_prefix(line)
+    parsed_header = parse_packet_header(text)
+    callsign, destination, path_raw = parsed_header if parsed_header else (None, None, None)
+    path = parse_path(path_raw)
+    used_digi = last_used_digipeater(path)
+    payload = packet_payload(text)
+    comment = packet_comment(payload)
+    lat, lon = parse_position(text)
+    station_type = infer_station_type(callsign, destination, payload, comment, text)
+    metadata: dict[str, Any] = {
+        "callsign": callsign,
+        "source_callsign": callsign,
+        "destination": destination,
+        "path_raw": path_raw,
+        "path": path,
+        "was_digipeated": bool(used_digi),
+        "was_direct": not bool(used_digi),
+        "last_used_digipeater": used_digi,
+        "heard_via": used_digi or "direct",
+        "heard_transport": "rf" if prefix and RF_PREFIX_RE.match(prefix) else "unknown",
+        "rf_channel_prefix": prefix if prefix and RF_PREFIX_RE.match(prefix) else None,
+        "station_type": station_type,
+        "payload": payload,
+        "comment": comment,
+        "lat": lat,
+        "lon": lon,
+        "line": text,
+    }
+    metadata.update(parse_repeater_object(payload))
+    metadata.update(range_and_bearing(station_cfg.get("lat"), station_cfg.get("lon"), lat, lon))
+    if last_audio:
+        metadata.update(
+            {
+                "audio_level": last_audio.get("level"),
+                "audio_quality": last_audio.get("quality"),
+                "audio_bar": last_audio.get("bar"),
+                "audio_source_callsign": last_audio.get("source_callsign"),
+                "audio_timestamp": last_audio.get("timestamp"),
+            }
+        )
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
 def parse_line(line: str) -> dict[str, str | float | None]:
     text = normalize_packet_line(line)
     parsed_header = parse_packet_header(text)
-    callsign, destination = parsed_header if parsed_header else (None, None)
+    callsign, destination, _path = parsed_header if parsed_header else (None, None, None)
     lat, lon = parse_position(text)
     return {
         "callsign": callsign,
@@ -223,7 +384,9 @@ def follow(path: Path) -> Iterator[str]:
 
 
 def run_forever() -> None:
-    cfg = source_config("aprs")
+    full_cfg = load_config()
+    cfg = source_config("aprs", full_cfg)
+    station_cfg = full_cfg.get("station", {}) or {}
     source_id = get_or_create_source(
         cfg.get("name", "APRS Direwolf"),
         "aprs",
@@ -232,12 +395,14 @@ def run_forever() -> None:
     )
     path = resolve_path(cfg.get("log_path", "./data/direwolf.log"))
     seen_packets: dict[str, float] = {}
-    seen_callsigns: set[str] = set()
+    seen_callsigns: set[str] = set(fetch_recent_aprs_callsigns())
     rf_packets_heard_total = 0
     ignored_igate_lines = 0
     ignored_status_lines = 0
     best_audio_level: int | None = None
+    last_audio: dict[str, Any] | None = None
     reset_aprs_status(APRS_CALLSIGN)
+    hydrate_aprs_status_from_recent_events(APRS_CALLSIGN)
 
     for line in follow(path):
         if not line:
@@ -249,10 +414,12 @@ def run_forever() -> None:
             update_ignored_igate(ignored_igate_lines, text)
             touch_source(source_id, "online")
             continue
-        audio_status = parse_audio_status(text)
+        audio_status = parse_audio_line(text)
         if audio_status:
             ignored_status_lines += 1
-            level, quality = audio_status
+            level = int(audio_status["level"])
+            quality = str(audio_status["quality"])
+            last_audio = audio_status
             update_audio_metrics(level, quality, best_audio_level, ignored_status_lines)
             if best_audio_level is None or level > best_audio_level:
                 best_audio_level = level
@@ -270,7 +437,7 @@ def run_forever() -> None:
             continue
         if not packet_like(line):
             continue
-        parsed = parse_line(line)
+        parsed = enrich_packet(line, last_audio, station_cfg)
         packet_line = str(parsed.get("line") or "")
         if duplicate_packet(packet_line, seen_packets, time.time()):
             continue

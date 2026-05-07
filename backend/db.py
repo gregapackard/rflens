@@ -550,6 +550,90 @@ def reset_aprs_status(callsign: str = "KF8GBU-10") -> None:
         )
 
 
+def hydrate_aprs_status_from_recent_events(callsign: str = "KF8GBU-10") -> None:
+    now = utc_now()
+    with connect() as conn:
+        ensure_aprs_status_table(conn)
+        latest = conn.execute(
+            """
+            SELECT timestamp, callsign
+            FROM events
+            WHERE event_type = 'aprs_packet'
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        unique = conn.execute(
+            """
+            SELECT COUNT(DISTINCT callsign) AS count
+            FROM events
+            WHERE event_type = 'aprs_packet'
+              AND callsign IS NOT NULL
+              AND callsign != ''
+            """
+        ).fetchone()
+        recent_audio_rows = conn.execute(
+            """
+            SELECT timestamp, metadata_json
+            FROM events
+            WHERE event_type = 'aprs_packet'
+              AND metadata_json LIKE '%audio_level%'
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 250
+            """
+        ).fetchall()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO aprs_status (
+                id, callsign, online, aprs_is_connected, aprs_is_verified,
+                rf_packets_heard_total, unique_callsigns_seen,
+                ignored_igate_lines, ignored_status_lines, updated_at
+            )
+            VALUES (1, ?, 1, 0, 0, 0, 0, 0, 0, ?)
+            """,
+            (callsign, now),
+        )
+        fields: dict[str, Any] = {
+            "callsign": callsign,
+            "online": 1,
+            "unique_callsigns_seen": int(unique["count"] or 0) if unique else 0,
+            "updated_at": now,
+        }
+        if latest:
+            fields["last_rf_packet_at"] = latest["timestamp"]
+            fields["last_rf_callsign"] = latest["callsign"]
+        best_audio_level: int | None = None
+        for audio_row in recent_audio_rows:
+            metadata = parse_metadata_payload(audio_row["metadata_json"])
+            level = as_float(metadata.get("audio_level"))
+            if level is None:
+                continue
+            if "last_audio_level" not in fields:
+                fields["last_audio_level"] = int(level)
+                fields["last_audio_quality"] = metadata.get("audio_quality")
+                fields["last_audio_timestamp"] = metadata.get("audio_timestamp") or audio_row["timestamp"]
+            if best_audio_level is None or level > best_audio_level:
+                best_audio_level = int(level)
+        if best_audio_level is not None:
+            fields["best_audio_level"] = best_audio_level
+        columns = ", ".join(f"{key} = ?" for key in fields)
+        conn.execute(f"UPDATE aprs_status SET {columns} WHERE id = 1", tuple(fields.values()))
+
+
+def fetch_recent_aprs_callsigns() -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT callsign
+            FROM events
+            WHERE event_type = 'aprs_packet'
+              AND callsign IS NOT NULL
+              AND callsign != ''
+            """
+        ).fetchall()
+    return [str(row["callsign"]) for row in rows]
+
+
 def update_aprs_status(**fields: Any) -> None:
     if not fields:
         return

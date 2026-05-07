@@ -203,6 +203,53 @@ function aircraftLabel(event) {
   return event.callsign || metadata.flight || metadata.hex || metadata.icao || event.id || "Unknown";
 }
 
+function titleCase(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function aprsMetadata(event) {
+  return parseMetadata(event);
+}
+
+function aprsTransportLabel(metadata) {
+  const transport = String(metadata.heard_transport || "").toUpperCase();
+  const prefix = metadata.rf_channel_prefix ? ` ${metadata.rf_channel_prefix}` : "";
+  if (transport === "RF") return `RF${prefix}`;
+  if (transport === "IP") return "IP";
+  return transport || "APRS";
+}
+
+function aprsDistanceLabel(metadata) {
+  const miles = Number(metadata.distance_miles);
+  return Number.isFinite(miles) ? `${miles.toFixed(0)} mi` : "";
+}
+
+function aprsViaLabel(metadata) {
+  if (metadata.heard_via && metadata.heard_via !== "direct") return `via ${metadata.heard_via}`;
+  if (metadata.was_direct === true || metadata.heard_via === "direct") return "direct";
+  return "";
+}
+
+function aprsAudioLabel(metadata) {
+  const level = Number(metadata.audio_level);
+  if (!Number.isFinite(level)) return "";
+  return metadata.audio_quality ? `${level} (${metadata.audio_quality})` : String(level);
+}
+
+function aprsPacketLabels(event) {
+  const metadata = aprsMetadata(event);
+  return [
+    aprsTransportLabel(metadata),
+    aprsDistanceLabel(metadata),
+    aprsViaLabel(metadata),
+    metadata.station_type ? titleCase(metadata.station_type) : "",
+    aprsAudioLabel(metadata) ? `audio ${aprsAudioLabel(metadata)}` : "",
+    validCoord(event.lat ?? metadata.lat, event.lon ?? metadata.lon) ? "position" : "",
+  ].filter(Boolean);
+}
+
 function uniqueAircraftEvents(adsb) {
   const byKey = new Map();
   adsb.forEach((event) => {
@@ -258,7 +305,13 @@ function eventLine(event) {
     return parts.join(", ");
   }
   if (event.event_type === "aprs_packet") {
-    return `APRS heard ${event.callsign || "station"}`;
+    const metadata = parseMetadata(event);
+    const parts = [`APRS heard ${event.callsign || metadata.source_callsign || "station"}`];
+    const distance = aprsDistanceLabel(metadata);
+    const via = aprsViaLabel(metadata);
+    if (distance) parts.push(distance);
+    if (via) parts.push(via);
+    return parts.join(", ");
   }
   if (event.event_type === "satellite_capture") {
     const name = event.callsign || metadata.satellite || metadata.name || "satellite";
@@ -273,9 +326,15 @@ function eventLine(event) {
 
 function eventDetail(event) {
   const parts = [];
+  const metadata = parseMetadata(event);
+  if (event.event_type === "aprs_packet") {
+    aprsPacketLabels(event).forEach((label) => parts.push(label));
+  }
   if (event.altitude != null) parts.push(`${Number(event.altitude).toLocaleString()} ft`);
   if (event.speed != null) parts.push(`${event.speed} kt`);
-  if (validCoord(event.lat, event.lon)) parts.push(`${Number(event.lat).toFixed(4)}, ${Number(event.lon).toFixed(4)}`);
+  if (validCoord(event.lat ?? metadata.lat, event.lon ?? metadata.lon)) {
+    parts.push(`${Number(event.lat ?? metadata.lat).toFixed(4)}, ${Number(event.lon ?? metadata.lon).toFixed(4)}`);
+  }
   return parts.join(" - ") || eventLine(event);
 }
 
@@ -486,7 +545,10 @@ function renderAprsTable(events) {
     <tr class="${secondsAgo(event.timestamp) <= 30 ? "recent-row" : ""}">
       <td>${esc(fmtTime(event.timestamp))}</td>
       <td>${esc(event.callsign || "-")}</td>
-      <td class="mono">${esc(event.raw_text || "")}</td>
+      <td>
+        <div>${aprsPacketLabels(event).map((label) => `<span class="pill">${esc(label)}</span>`).join(" ")}</div>
+        <div class="mono">${esc(event.raw_text || "")}</div>
+      </td>
     </tr>
   `).join("");
   setHtml("aprs-table", html);
@@ -599,6 +661,14 @@ function renderAprsCard(aprs, aprsStatus = {}) {
   const positioned = uniqueBy(aprs.filter((event) => validCoord(event.lat, event.lon)), (event) => event.callsign || `${event.lat},${event.lon}`);
   const recent = aprs.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   const newest = aprs.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp))[0];
+  const enriched = aprs.map((event) => ({ event, metadata: aprsMetadata(event) }));
+  const farthest = enriched
+    .map((item) => ({ event: item.event, miles: Number(item.metadata.distance_miles) }))
+    .filter((item) => Number.isFinite(item.miles))
+    .sort((a, b) => b.miles - a.miles)[0];
+  const directCount = enriched.filter((item) => item.metadata.was_direct === true || item.metadata.heard_via === "direct").length;
+  const digipeatedCount = enriched.filter((item) => item.metadata.was_digipeated === true || (item.metadata.heard_via && item.metadata.heard_via !== "direct")).length;
+  const topDigi = summarizeCounts(countBy(enriched.filter((item) => item.metadata.heard_via && item.metadata.heard_via !== "direct"), (item) => item.metadata.heard_via), 1);
   const stationCount = Number(aprsStatus.unique_callsigns_seen);
   const heardTotal = Number(aprsStatus.rf_packets_heard_total);
   const lastAudio = Number(aprsStatus.last_audio_level);
@@ -612,11 +682,12 @@ function renderAprsCard(aprs, aprsStatus = {}) {
   setMany(["dash-aprs-callsign", "overview-aprs-callsign"], aprsStatus.callsign || "No data yet");
   setMany(["dash-aprs-is", "overview-aprs-is"], aprsIsText(aprsStatus));
   setMany(["dash-aprs-last-rf", "overview-aprs-last-rf"], lastRf);
-  setMany(["dash-aprs-updated", "overview-aprs-updated"], aprsStatus.last_rf_packet_at ? relTime(aprsStatus.last_rf_packet_at) : (newest ? relTime(newest.timestamp) : "No data yet"));
   setMany(["dash-aprs-stations", "overview-aprs-stations"], Number.isFinite(stationCount) ? stationCount : (aprs.length ? stations.length : "No data yet"));
   setMany(["dash-aprs-packets", "overview-aprs-packets"], Number.isFinite(heardTotal) ? heardTotal : (aprs.length ? aprs.length : "No data yet"));
   setMany(["dash-aprs-positioned", "overview-aprs-positioned"], aprs.length ? positioned.length : "No data yet");
-  setMany(["dash-aprs-newest", "overview-aprs-newest"], aprsStatus.last_rf_callsign || newest?.callsign || "No data yet");
+  setMany(["dash-aprs-farthest", "overview-aprs-farthest"], farthest ? `${farthest.event.callsign || "station"}, ${farthest.miles.toFixed(0)} mi` : "No data yet");
+  setMany(["dash-aprs-direct-digi", "overview-aprs-direct-digi"], aprs.length ? `${directCount} / ${digipeatedCount}` : "No data yet");
+  setMany(["dash-aprs-top-digi", "overview-aprs-top-digi"], topDigi);
   setMany(["dash-aprs-recent", "overview-aprs-recent"], aprs.length ? `${recent.length} packets` : "No data yet");
   setMany(["dash-aprs-audio", "overview-aprs-audio"], audioText(lastAudio, audioQuality));
   setMany(["dash-aprs-best-audio", "overview-aprs-best-audio"], numberOrFallback(bestAudio));

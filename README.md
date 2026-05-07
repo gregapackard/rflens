@@ -1,19 +1,51 @@
-# RF Lens
+# RFLens
 
-RF Lens is a local-only multi-SDR observability dashboard for ham radio and RF monitoring.
+RFLens helps amateur radio operators see, measure, and improve their RF footprint across APRS, ADS-B, satellite/weather captures, and local SDR services — using affordable hardware and open-source software.
+
+It gives hams, RF experimenters, and homelab operators a plain-English view of what their station is hearing, how those signals arrived, how far away they were, and whether local RF services are healthy.
 
 It combines:
 - APRS packets from Direwolf
-- ADS-B aircraft data from readsb
-- Satellite captures from SatDump
+- ADS-B aircraft data from readsb/tar1090
+- Satellite and weather captures from SatDump
+- Local SDR/service health
+- SQLite-backed event history and RF insights
 
-into one SQLite-backed FastAPI dashboard.
+For ADS-B map rendering, RFLens intentionally reuses the local readsb/tar1090 web UI instead of reimplementing a full aircraft tracker. tar1090 is the recommended ADS-B map renderer; RFLens focuses on unified RF dashboarding, service health, event timelines, APRS overview, SatDump capture/pass status, and links or embeds to best-in-class tools.
 
-For ADS-B map rendering, RF Lens intentionally reuses the local readsb/tar1090 web UI instead of reimplementing a full aircraft tracker. tar1090 is the recommended ADS-B map renderer; RF Lens focuses on unified RF dashboarding, service health, event timelines, APRS overview, SatDump capture/pass status, and links or embeds to best-in-class tools.
+RFLens is built for operational awareness on a 24/7 RF closet node, homelab, field station, or Hamvention demo.
 
-RF Lens is not a map tool. Its RF Overview is a text dashboard for operational awareness.
+## What RFLens Is For
 
-Designed for a 24/7 RF closet node, homelab, field station, or Hamvention demo.
+RFLens is designed to answer practical station questions:
+
+- What did my antenna hear today?
+- Was that packet direct, digipeated, or network-side?
+- How far away was it?
+- What was the farthest direct RF heard today?
+- What was digipeated versus actually heard direct?
+- Is my iGate connected and eligible to gate?
+- Was gating confirmed or unconfirmed?
+- Which RF services are healthy?
+- Are my SDR services running cleanly?
+
+## Current Scope
+
+### APRS
+
+RF-heard packets, station hints, distance, audio/decode quality, iGate status, and gating evidence. RFLens uses honest RF language. It should distinguish direct RF, digipeated RF, APRS-IS/network-side observations, gate eligible, gate unconfirmed, and confirmed gated. Do not claim a packet was gated by the local station unless APRS-IS path evidence confirms it, such as `qAR`, `qAO`, or `qAS` with the local callsign.
+
+### ADS-B
+
+readsb ingestion, aircraft events, local range/count summaries, and tar1090 integration for map rendering.
+
+### Satellite/weather captures
+
+SatDump capture watching and capture event history.
+
+### Local SDR services
+
+API, ingestor, radio pipeline, and source health visibility.
 
 ## Setup
 
@@ -39,7 +71,7 @@ http://rflens:8080/ui
 http://rflens.local:8080/ui
 ```
 
-RF Lens is hostname-friendly. The frontend uses relative `/api/...` and `/ui/...` paths, so it works through DNS, mDNS, or a reverse proxy such as `http://rflens/`.
+RFLens is hostname-friendly. The frontend uses relative `/api/...` and `/ui/...` paths, so it works through DNS, mDNS, or a reverse proxy such as `http://rflens/`.
 
 ## ADS-B Tracking
 
@@ -51,7 +83,7 @@ adsb_ui:
   url: "http://rfnode.local/tar1090/"
 ```
 
-If `adsb_ui.enabled` is false or `adsb_ui.url` is empty, RF Lens shows a setup message instead of the iframe. If the iframe cannot load, RF Lens shows an “Open ADS-B Map” button that opens tar1090 in a new tab. ADS-B ingestion still runs through RF Lens so dashboard counts, event tables, and historical observability keep working.
+If `adsb_ui.enabled` is false or `adsb_ui.url` is empty, RFLens shows a setup message instead of the iframe. If the iframe cannot load, RFLens shows an "Open ADS-B Map" button that opens tar1090 in a new tab. ADS-B ingestion still runs through RFLens so dashboard counts, event tables, and historical observability keep working.
 
 ## RF Overview
 
@@ -69,7 +101,7 @@ Logs are written to `./data/logs/`.
 
 ## Run With systemd
 
-Production-style systemd unit files live in `deploy/systemd/`. They assume RF Lens is installed at `/home/rfnode/rflens` with its virtualenv at `/home/rfnode/rflens/venv`.
+Production-style systemd unit files live in `deploy/systemd/`. They assume RFLens is installed at `/home/rfnode/rflens` with its virtualenv at `/home/rfnode/rflens/venv`.
 
 Install and start the API, ADS-B ingestor, APRS radio pipeline, and APRS ingestor:
 
@@ -103,7 +135,7 @@ journalctl -u rflens-aprs-radio -f
 journalctl -u rflens-aprs -f
 ```
 
-The APRS radio unit runs `rtl_fm` for SDR serial `APRS001` at `144.390M` and pipes audio into Direwolf using `/home/rfnode/aprs/direwolf.conf`. It appends Direwolf output to `/home/rfnode/rflens/data/direwolf.log` with `tee`; RF Lens tails that log from the APRS ingestor service.
+The APRS radio unit runs `rtl_fm` for SDR serial `APRS001` at `144.390M` and pipes audio into Direwolf using `/home/rfnode/aprs/direwolf.conf`. It appends Direwolf output to `/home/rfnode/rflens/data/direwolf.log` with `tee`; RFLens tails that log from the APRS ingestor service.
 
 Remove installed units:
 
@@ -123,7 +155,7 @@ python -m backend.ingestors.satdump_watcher
 
 ### ADS-B readsb
 
-RF Lens reads readsb aircraft JSON from the configured path:
+RFLens reads readsb aircraft JSON from the configured path:
 
 ```yaml
 sources:
@@ -137,7 +169,7 @@ Common paths are `/run/readsb/aircraft.json` and `/var/run/readsb/aircraft.json`
 
 ### APRS Direwolf
 
-For the MVP, RF Lens tails a Direwolf text log:
+For the MVP, RFLens tails a Direwolf text log:
 
 ```yaml
 sources:
@@ -150,7 +182,7 @@ It stores packet-like lines with the raw line and best-effort parsed fields.
 
 ### SatDump Captures
 
-RF Lens watches a SatDump output directory:
+RFLens watches a SatDump output directory:
 
 ```yaml
 sources:
@@ -174,8 +206,16 @@ New capture folders and image files are inserted into the captures table and mir
 - `GET /api/captures`
 - `POST /api/events`
 
+## Project Principles
+
+- Local-first: RFLens runs on the operator's node and does not require cloud services for the dashboard.
+- Affordable hardware: it is designed around practical SDRs and local RF node hardware.
+- Honest RF language: direct RF, digipeated RF, network-side, gate-eligible, gate-unconfirmed, and confirmed-gated observations should stay clearly separated.
+- Open-source software: it builds on tools such as Direwolf, readsb, tar1090, SatDump, SQLite, and FastAPI.
+- Operator-focused insight: the dashboard should explain what is notable, not just list raw rows.
+
 ## Notes
 
-- RF Lens is local-only and does not call cloud APIs.
+- RFLens is local-only and does not call cloud APIs.
 - The frontend uses no external CDNs or assets.
 - SQLite data lives in `./data/rflens.db` by default.

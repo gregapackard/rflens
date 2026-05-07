@@ -942,6 +942,51 @@ def update_recent_aprs_gate_confirmation(
         )
 
 
+def update_aprs_event_metadata(
+    *,
+    event_id: int,
+    metadata_updates: dict[str, Any],
+    lat: float | None = None,
+    lon: float | None = None,
+) -> bool:
+    if not event_id:
+        return False
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, lat, lon, metadata_json
+            FROM events
+            WHERE id = ?
+              AND event_type = 'aprs_packet'
+            """,
+            (event_id,),
+        ).fetchone()
+        if not row:
+            return False
+        metadata = parse_metadata_payload(row["metadata_json"])
+        metadata.update({key: value for key, value in metadata_updates.items() if value is not None})
+        update_lat = lat if row["lat"] is None and lat is not None else row["lat"]
+        update_lon = lon if row["lon"] is None and lon is not None else row["lon"]
+        if row["lat"] is None and lat is not None:
+            metadata["lat"] = lat
+        if row["lon"] is None and lon is not None:
+            metadata["lon"] = lon
+        conn.execute(
+            """
+            UPDATE events
+            SET lat = ?, lon = ?, metadata_json = ?
+            WHERE id = ?
+            """,
+            (
+                update_lat,
+                update_lon,
+                json.dumps(metadata, separators=(",", ":"), default=str),
+                event_id,
+            ),
+        )
+        return True
+
+
 def record_by_type(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(record.get("record_type")): record for record in records}
 

@@ -15,6 +15,7 @@ from backend.db import (
     insert_event,
     reset_aprs_status,
     touch_source,
+    update_aprs_event_metadata,
     update_recent_aprs_gate_confirmation,
     update_aprs_status,
     utc_now,
@@ -39,6 +40,35 @@ WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
 Q_CONSTRUCT_RE = re.compile(r",qA[A-Z],([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)", re.IGNORECASE)
 NETWORK_PATH_RE = re.compile(r"(?:^|,)(?:TCPIP\*?|qA[A-Z])(?:,|$)", re.IGNORECASE)
 POSITION_MOTION_RE = re.compile(r"\d{3}/\d{3}")
+DECODED_POSITION_RE = re.compile(
+    r"(?P<lat_deg>\d{1,2})[^\dA-Z]+(?P<lat_min>\d{1,2}\.\d+)\s*(?P<lat_hemi>[NS])"
+    r".*?"
+    r"(?P<lon_deg>\d{1,3})[^\dA-Z]+(?P<lon_min>\d{1,2}\.\d+)\s*(?P<lon_hemi>[EW])",
+    re.IGNORECASE,
+)
+DECODED_DECIMAL_POSITION_RE = re.compile(
+    r"\b(?:lat(?:itude)?\s*[=: ]\s*)?(?P<lat>[+-]?\d{1,2}\.\d+)\s*,\s*"
+    r"(?:lon(?:gitude)?\s*[=: ]\s*)?(?P<lon>[+-]?\d{1,3}\.\d+)\b",
+    re.IGNORECASE,
+)
+SPEED_RE = re.compile(r"\b(?:speed\s*)?(?P<speed>\d{1,3}(?:\.\d+)?)\s*(?P<unit>mph|knots?|kts?|kt)\b", re.IGNORECASE)
+COURSE_RE = re.compile(r"\b(?:course|bearing|cog)\s*[=: ]\s*(?P<course>\d{1,3})\b", re.IGNORECASE)
+ALTITUDE_RE = re.compile(r"\b(?:alt(?:itude)?\s*[=: ]\s*)?(?P<altitude>-?\d{1,6})\s*(?:ft|feet)\b", re.IGNORECASE)
+MIC_E_STATUS_RE = re.compile(r"\b(?:mic-?e|status)\b[^:]*[:=,]\s*(?P<status>[^,;]+)", re.IGNORECASE)
+MANUFACTURER_RE = re.compile(r"\b(?:manufacturer|device|radio|modem)\s*[=:]\s*(?P<manufacturer>[^,;]+)", re.IGNORECASE)
+DECODED_KEYWORDS = (
+    "mic-e",
+    "mice",
+    "latitude",
+    "longitude",
+    "course",
+    "speed",
+    "altitude",
+    "manufacturer",
+    "device",
+    "symbol",
+)
+RECENT_PACKET_FOLLOWUP_SECONDS = 4
 DEFAULT_DIRECT_RF_QUESTIONABLE_MILES = 300
 DEFAULT_DIGIPEATED_RF_QUESTIONABLE_MILES = 700
 SSID_HINTS = {
@@ -228,6 +258,25 @@ def parse_position(text: str) -> tuple[float | None, float | None]:
     return lat, lon
 
 
+def parse_decoded_position(text: str) -> tuple[float | None, float | None]:
+    match = DECODED_POSITION_RE.search(text)
+    if match:
+        lat = int(match.group("lat_deg")) + float(match.group("lat_min")) / 60
+        lon = int(match.group("lon_deg")) + float(match.group("lon_min")) / 60
+        if match.group("lat_hemi").upper() == "S":
+            lat *= -1
+        if match.group("lon_hemi").upper() == "W":
+            lon *= -1
+        return lat, lon
+    decimal = DECODED_DECIMAL_POSITION_RE.search(text)
+    if decimal:
+        lat = float(decimal.group("lat"))
+        lon = float(decimal.group("lon"))
+        if valid_coord(lat, lon):
+            return lat, lon
+    return None, None
+
+
 def parse_path(path_raw: str | None) -> list[str]:
     if not path_raw:
         return []
@@ -357,6 +406,81 @@ def parse_repeater_object(payload: str) -> dict[str, Any]:
     if offset:
         data["offset_khz"] = int(offset.group(1)) * 10
     return {key: value for key, value in data.items() if value not in (None, "")}
+
+
+def parse_decoded_followup_line(text: str) -> dict[str, Any] | None:
+    prefix, line = split_prefix(text)
+    if not line:
+        return None
+    if ignored_prefix(prefix):
+        return None
+    if parse_packet_header(line) or parse_audio_line(line) or aprs_is_status_line(line):
+        return None
+    lowered = line.lower()
+    lat, lon = parse_decoded_position(line)
+    decoded: dict[str, Any] = {}
+    if lat is not None and lon is not None:
+        decoded["decoded_lat"] = round(lat, 6)
+        decoded["decoded_lon"] = round(lon, 6)
+    speed_match = SPEED_RE.search(line)
+    if speed_match:
+        speed = float(speed_match.group("speed"))
+        unit = speed_match.group("unit").lower()
+        if unit in {"kt", "kts", "knot", "knots"}:
+            decoded["speed_knots"] = speed
+            decoded["speed_mph"] = round(speed * 1.15078, 2)
+        else:
+            decoded["speed_mph"] = speed
+            decoded["speed_knots"] = round(speed / 1.15078, 2)
+    course_match = COURSE_RE.search(line)
+    if course_match:
+        decoded["course_degrees"] = int(course_match.group("course")) % 360
+    altitude_match = ALTITUDE_RE.search(line)
+    if altitude_match:
+        decoded["altitude_ft"] = int(altitude_match.group("altitude"))
+    status_match = MIC_E_STATUS_RE.search(line)
+    if status_match:
+        decoded["mic_e_status"] = status_match.group("status").strip()
+    manufacturer_match = MANUFACTURER_RE.search(line)
+    if manufacturer_match:
+        decoded["manufacturer"] = manufacturer_match.group("manufacturer").strip()
+    if "symbol" in lowered:
+        symbol_match = re.search(r"\bsymbol\s*[=:]\s*([^,;]+)", line, re.IGNORECASE)
+        if symbol_match:
+            decoded["symbol"] = symbol_match.group(1).strip()
+    if not decoded and not any(keyword in lowered for keyword in DECODED_KEYWORDS):
+        return None
+    decoded["decoded_followup_line"] = line
+    return decoded
+
+
+def decoded_followup_metadata(
+    line: str,
+    existing_metadata: dict[str, Any],
+    station_cfg: dict[str, Any],
+) -> tuple[dict[str, Any], float | None, float | None] | None:
+    decoded = parse_decoded_followup_line(line)
+    if not decoded:
+        return None
+    followup_lines = list(existing_metadata.get("decoded_followup_lines") or [])
+    raw_line = decoded.pop("decoded_followup_line")
+    if raw_line not in followup_lines:
+        followup_lines.append(raw_line)
+    updates: dict[str, Any] = {
+        "decoded_followup_lines": followup_lines[-8:],
+        "direwolf_decoded_text": " ".join(followup_lines[-8:]),
+        **decoded,
+    }
+    lat = decoded.get("decoded_lat")
+    lon = decoded.get("decoded_lon")
+    update_lat = float(lat) if lat is not None and existing_metadata.get("lat") is None else None
+    update_lon = float(lon) if lon is not None and existing_metadata.get("lon") is None else None
+    if update_lat is not None and update_lon is not None:
+        category = str(existing_metadata.get("heard_category") or "unknown")
+        distances = range_and_bearing(station_cfg.get("lat"), station_cfg.get("lon"), update_lat, update_lon)
+        updates.update(distances)
+        updates["distance_quality"] = distance_quality(updates.get("distance_miles"), category, station_cfg)
+    return updates, update_lat, update_lon
 
 
 def infer_station_type(source: str | None, destination: str | None, payload: str, comment: str, raw_text: str, ssid: int | None) -> tuple[str, str]:
@@ -569,6 +693,7 @@ def run_forever() -> None:
     last_audio: dict[str, Any] | None = None
     aprs_is_connected = False
     aprs_is_verified = False
+    recent_packet: dict[str, Any] | None = None
     reset_aprs_status(local_callsign)
     hydrated_status = hydrate_aprs_status_from_recent_events(local_callsign)
     rf_packets_heard_total = int(hydrated_status.get("rf_packets_heard_total") or 0)
@@ -601,6 +726,23 @@ def run_forever() -> None:
                 best_audio_level = level
             touch_source(source_id, "online")
             continue
+        if recent_packet and time.time() - float(recent_packet.get("seen_at") or 0) <= RECENT_PACKET_FOLLOWUP_SECONDS:
+            decoded = decoded_followup_metadata(text, recent_packet.get("metadata") or {}, station_cfg)
+            if decoded:
+                metadata_updates, update_lat, update_lon = decoded
+                if update_aprs_event_metadata(
+                    event_id=int(recent_packet["id"]),
+                    metadata_updates=metadata_updates,
+                    lat=update_lat,
+                    lon=update_lon,
+                ):
+                    recent_packet["metadata"].update(metadata_updates)
+                    if update_lat is not None:
+                        recent_packet["metadata"]["lat"] = update_lat
+                    if update_lon is not None:
+                        recent_packet["metadata"]["lon"] = update_lon
+                    touch_source(source_id, "online")
+                    continue
         if status_or_help_line(text):
             ignored_status_lines += 1
             if aprs_is_status_line(text):
@@ -619,7 +761,7 @@ def run_forever() -> None:
         packet_line = str(parsed.get("line") or "")
         if duplicate_packet(packet_line, seen_packets, time.time()):
             continue
-        insert_event(
+        event_id = insert_event(
             source_id=source_id,
             event_type="aprs_packet",
             callsign=parsed.get("callsign"),
@@ -628,6 +770,11 @@ def run_forever() -> None:
             raw_text=line,
             metadata=parsed,
         )
+        recent_packet = {
+            "id": event_id,
+            "metadata": dict(parsed),
+            "seen_at": time.time(),
+        }
         packet_timestamp = utc_now()
         rf_packets_heard_total += 1
         callsign = str(parsed.get("callsign") or "")

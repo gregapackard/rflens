@@ -959,6 +959,9 @@ def first_number(*values: Any) -> float | None:
 
 
 WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
+NETWORK_PATH_RE = re.compile(r"(?:^|,)(?:TCPIP\*?|qA[A-Z])(?:,|$)", re.IGNORECASE)
+DIRECT_RF_QUESTIONABLE_MILES = 300
+DIGIPEATED_RF_QUESTIONABLE_MILES = 700
 
 
 def clean_path_token(value: Any) -> str:
@@ -992,11 +995,57 @@ def preferred_heard_via(metadata: dict[str, Any]) -> str | None:
     return heard_via
 
 
+def metadata_network_seen(metadata: dict[str, Any]) -> bool:
+    path_raw = str(metadata.get("path_raw") or "")
+    path = ",".join(metadata_path(metadata))
+    return bool(metadata.get("network_seen") is True or NETWORK_PATH_RE.search(path_raw) or NETWORK_PATH_RE.search(path))
+
+
+def infer_heard_category(metadata: dict[str, Any]) -> str:
+    explicit = str(metadata.get("heard_category") or "").strip()
+    if explicit in {"direct_rf", "digipeated_rf", "aprs_is", "unknown"}:
+        return explicit
+    if metadata_network_seen(metadata):
+        return "aprs_is"
+    if str(metadata.get("heard_transport") or "").lower() == "rf" or metadata.get("heard_over_rf") is True:
+        if metadata.get("was_direct") is True and metadata.get("was_digipeated") is not True:
+            return "direct_rf"
+        if metadata.get("was_digipeated") is True:
+            return "digipeated_rf"
+    return "unknown"
+
+
+def infer_distance_quality(metadata: dict[str, Any], category: str) -> str:
+    explicit = str(metadata.get("distance_quality") or "").strip()
+    if explicit in {"normal", "long_range", "questionable", "unknown"}:
+        return explicit
+    miles = as_float(metadata.get("distance_miles"))
+    if miles is None:
+        return "unknown"
+    if miles < 0:
+        return "questionable"
+    if category == "direct_rf" and miles > DIRECT_RF_QUESTIONABLE_MILES:
+        return "questionable"
+    if category == "digipeated_rf" and miles > DIGIPEATED_RF_QUESTIONABLE_MILES:
+        return "questionable"
+    if category in {"direct_rf", "digipeated_rf"} and miles > 150:
+        return "long_range"
+    return "normal"
+
+
 def enriched_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(metadata)
     via = preferred_heard_via(enriched)
     if via:
         enriched["preferred_heard_via"] = via
+    category = infer_heard_category(enriched)
+    enriched["heard_category"] = category
+    if category == "aprs_is":
+        enriched.pop("preferred_heard_via", None)
+    enriched["direct_rf_heard"] = category == "direct_rf"
+    enriched["digipeated_rf_heard"] = category == "digipeated_rf"
+    enriched["network_seen"] = category == "aprs_is"
+    enriched["distance_quality"] = infer_distance_quality(enriched, category)
     if enriched.get("heard_over_rf") is True:
         enriched["aprs_is_connected_at_heard"] = bool(enriched.get("gate_eligible"))
         enriched["gate_confirmed"] = enriched.get("confirmed_gated_by_me") is True
@@ -1122,6 +1171,57 @@ def aprs_gate_stats(events_with_metadata: list[tuple[dict[str, Any], dict[str, A
     }
 
 
+def aprs_category_stats(events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]]) -> dict[str, int]:
+    counts = {"direct_rf": 0, "digipeated_rf": 0, "aprs_is": 0, "unknown": 0}
+    for _event, metadata in events_with_metadata:
+        category = str(metadata.get("heard_category") or "unknown")
+        counts[category if category in counts else "unknown"] += 1
+    return counts
+
+
+def farthest_by_category(
+    events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]],
+    category: str,
+    *,
+    normal_only: bool = True,
+) -> tuple[dict[str, Any] | None, dict[str, Any], float | None]:
+    candidates = []
+    for event, metadata in events_with_metadata:
+        if metadata.get("heard_category") != category:
+            continue
+        miles = as_float(metadata.get("distance_miles"))
+        if miles is None:
+            continue
+        if normal_only and metadata.get("distance_quality") == "questionable":
+            continue
+        candidates.append((event, metadata, miles))
+    return max(candidates, key=lambda item: item[2], default=(None, {}, None))
+
+
+def farthest_any_rf(events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]]) -> tuple[dict[str, Any] | None, dict[str, Any], float | None]:
+    candidates = []
+    for event, metadata in events_with_metadata:
+        if metadata.get("heard_category") not in {"direct_rf", "digipeated_rf"}:
+            continue
+        if metadata.get("distance_quality") == "questionable":
+            continue
+        miles = as_float(metadata.get("distance_miles"))
+        if miles is not None:
+            candidates.append((event, metadata, miles))
+    return max(candidates, key=lambda item: item[2], default=(None, {}, None))
+
+
+def format_aprs_range(item: tuple[dict[str, Any] | None, dict[str, Any], float | None], include_via: bool = False) -> str | None:
+    event, metadata, miles = item
+    if not event or miles is None:
+        return None
+    text = f"{event.get('callsign')} at approximately {miles:.0f} miles"
+    via = metadata.get("preferred_heard_via")
+    if include_via and via and via != "direct":
+        text += f" via {via}"
+    return text
+
+
 def aprs_event_sentence(event: dict[str, Any]) -> str:
     metadata = enriched_metadata(parse_metadata_payload(event.get("metadata_json")))
     callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
@@ -1134,8 +1234,16 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
             parts.append(f"with PL {metadata['tone_hz']}")
         return " ".join(parts) + "."
 
-    transport = str(metadata.get("heard_transport") or "RF").upper()
-    parts = [f"I heard {callsign} over {transport}"]
+    category = metadata.get("heard_category")
+    if category == "aprs_is":
+        return f"I saw {callsign} on APRS-IS/network traffic, but it was not heard directly by the antenna."
+    if category == "direct_rf":
+        parts = [f"I heard {callsign} directly over RF"]
+    elif category == "digipeated_rf":
+        parts = [f"I heard {callsign} over RF"]
+    else:
+        transport = str(metadata.get("heard_transport") or "RF").upper()
+        parts = [f"I heard {callsign} over {transport}"]
     distance = format_distance_miles(metadata.get("distance_miles"))
     if distance:
         parts.append(f"{distance} away")
@@ -1150,6 +1258,10 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
     sentence = ", ".join(parts)
     if station_type and station_type != "station":
         sentence += f", and it appears to be a {station_type}"
+    if category == "digipeated_rf":
+        sentence += ". This was digipeated, not direct"
+    if metadata.get("distance_quality") == "questionable":
+        sentence += ". The distance looks questionable for this receive category"
     gate_phrase = gate_status_phrase(metadata)
     if gate_phrase:
         sentence += f"; {gate_phrase}"
@@ -1195,17 +1307,17 @@ def fetch_insights() -> dict[str, Any]:
     adsb_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in adsb_today]
     gate_stats = aprs_gate_stats(aprs_with_metadata)
     gate_stats_today = aprs_gate_stats(aprs_today_with_metadata)
+    category_stats = aprs_category_stats(aprs_with_metadata)
+    category_stats_today = aprs_category_stats(aprs_today_with_metadata)
 
-    farthest_aprs = max(
-        ((event, metadata, as_float(metadata.get("distance_miles"))) for event, metadata in aprs_with_metadata),
-        key=lambda item: item[2] if item[2] is not None else -1,
-        default=(None, {}, None),
-    )
-    farthest_today = max(
-        ((event, metadata, as_float(metadata.get("distance_miles"))) for event, metadata in aprs_today_with_metadata),
-        key=lambda item: item[2] if item[2] is not None else -1,
-        default=(None, {}, None),
-    )
+    farthest_direct = farthest_by_category(aprs_with_metadata, "direct_rf")
+    farthest_digipeated = farthest_by_category(aprs_with_metadata, "digipeated_rf")
+    farthest_network = farthest_by_category(aprs_with_metadata, "aprs_is", normal_only=False)
+    farthest_rf = farthest_any_rf(aprs_with_metadata)
+    farthest_direct_today = farthest_by_category(aprs_today_with_metadata, "direct_rf")
+    farthest_digipeated_today = farthest_by_category(aprs_today_with_metadata, "digipeated_rf")
+    farthest_network_today = farthest_by_category(aprs_today_with_metadata, "aprs_is", normal_only=False)
+    farthest_rf_today = farthest_any_rf(aprs_today_with_metadata)
     best_audio = max(
         ((event, metadata, as_float(metadata.get("audio_level"))) for event, metadata in aprs_with_metadata),
         key=lambda item: item[2] if item[2] is not None else -1,
@@ -1220,12 +1332,14 @@ def fetch_insights() -> dict[str, Any]:
     top_digi = top_count([
         str(metadata.get("preferred_heard_via") or "")
         for _event, metadata in aprs_with_metadata
-        if metadata.get("preferred_heard_via") and metadata.get("preferred_heard_via") != "direct"
+        if metadata.get("heard_category") in {"direct_rf", "digipeated_rf"}
+        and metadata.get("preferred_heard_via") and metadata.get("preferred_heard_via") != "direct"
     ])
     top_digi_today = top_count([
         str(metadata.get("preferred_heard_via") or "")
         for _event, metadata in aprs_today_with_metadata
-        if metadata.get("preferred_heard_via") and metadata.get("preferred_heard_via") != "direct"
+        if metadata.get("heard_category") in {"direct_rf", "digipeated_rf"}
+        and metadata.get("preferred_heard_via") and metadata.get("preferred_heard_via") != "direct"
     ])
 
     adsb_ranges = [value for value in (as_float(metadata.get("r_dst")) for _event, metadata in adsb_today_with_metadata) if value is not None]
@@ -1245,10 +1359,18 @@ def fetch_insights() -> dict[str, Any]:
     elif aprs_status.get("online"):
         summary.append("Your APRS receiver is online, but APRS-IS verification is not confirmed yet.")
     if aprs_recent:
-        unique_recent = len({event.get("callsign") for event in aprs_recent if event.get("callsign")})
+        unique_recent = len({
+            event.get("callsign")
+            for event, metadata in aprs_with_metadata
+            if event.get("callsign") and metadata.get("heard_category") in {"direct_rf", "digipeated_rf"}
+        })
         summary.append(f"You heard {unique_recent} APRS stations recently over RF.")
-    if farthest_aprs[0] and farthest_aprs[2] is not None:
-        summary.append(f"The farthest APRS station heard was {farthest_aprs[0].get('callsign')} at approximately {farthest_aprs[2]:.0f} miles.")
+    if farthest_direct[0]:
+        summary.append(f"Farthest direct RF heard: {format_aprs_range(farthest_direct)}.")
+    if farthest_digipeated[0]:
+        summary.append(f"Farthest digipeated RF heard: {format_aprs_range(farthest_digipeated, include_via=True)}.")
+    if farthest_network[0] and farthest_network[2] and farthest_network[2] > max(farthest_rf[2] or 0, 0):
+        summary.append(f"A long-distance APRS position was seen at approximately {farthest_network[2]:.0f} miles, but it was APRS-IS/network-side, not direct RF.")
     if latest_aprs:
         via = preferred_heard_via(latest_metadata)
         via_text = f" via {via}" if via and via != "direct" else " directly" if via == "direct" else ""
@@ -1285,11 +1407,17 @@ def fetch_insights() -> dict[str, Any]:
         "daily": {
             "aprs_packets_heard_today": len(aprs_today),
             "unique_aprs_stations_heard_today": len({event.get("callsign") for event in aprs_today if event.get("callsign")}),
+            "direct_rf_heard_today": category_stats_today["direct_rf"],
+            "digipeated_rf_heard_today": category_stats_today["digipeated_rf"],
+            "network_seen_today": category_stats_today["aprs_is"],
+            "unknown_aprs_today": category_stats_today["unknown"],
             "farthest_aprs_station_today": (
-                f"{farthest_today[0].get('callsign')} at approximately {farthest_today[2]:.0f} miles"
-                if farthest_today[0] and farthest_today[2] is not None
-                else None
+                format_aprs_range(farthest_rf_today, include_via=True)
             ),
+            "farthest_direct_rf_today": format_aprs_range(farthest_direct_today),
+            "farthest_digipeated_rf_today": format_aprs_range(farthest_digipeated_today, include_via=True),
+            "farthest_any_rf_today": format_aprs_range(farthest_rf_today, include_via=True),
+            "farthest_network_seen_today": format_aprs_range(farthest_network_today),
             "best_aprs_audio_today": (
                 format_audio(best_audio_today[2], best_audio_today[1].get("audio_quality"))
                 if best_audio_today[0] and best_audio_today[2] is not None
@@ -1308,10 +1436,12 @@ def fetch_insights() -> dict[str, Any]:
             "plain_english": aprs_plain,
             "notable": {
                 "farthest_heard": (
-                    f"{farthest_aprs[0].get('callsign')} at approximately {farthest_aprs[2]:.0f} miles"
-                    if farthest_aprs[0] and farthest_aprs[2] is not None
-                    else None
+                    format_aprs_range(farthest_rf, include_via=True)
                 ),
+                "farthest_direct_rf": format_aprs_range(farthest_direct),
+                "farthest_digipeated_rf": format_aprs_range(farthest_digipeated, include_via=True),
+                "farthest_any_rf": format_aprs_range(farthest_rf, include_via=True),
+                "farthest_network_seen": format_aprs_range(farthest_network),
                 "best_audio": (
                     f"{best_audio[0].get('callsign')} with audio {format_audio(best_audio[2], best_audio[1].get('audio_quality'))}"
                     if best_audio[0] and best_audio[2] is not None
@@ -1331,6 +1461,7 @@ def fetch_insights() -> dict[str, Any]:
                 "top_digipeater": top_digi,
             },
             "gate": gate_stats,
+            "categories": category_stats,
         },
         "adsb": {
             "plain_english": adsb_plain,

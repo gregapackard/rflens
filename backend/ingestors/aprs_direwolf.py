@@ -37,6 +37,9 @@ OFFSET_RE = re.compile(r"(?<!\d)([+-]\d{3,4})(?!\d)")
 AIRCRAFT_SOURCE_RE = re.compile(r"^N[0-9]{1,5}[A-Z]{0,2}(?:-\d{1,2})?$", re.IGNORECASE)
 WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
 Q_CONSTRUCT_RE = re.compile(r",qA[A-Z],([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)", re.IGNORECASE)
+NETWORK_PATH_RE = re.compile(r"(?:^|,)(?:TCPIP\*?|qA[A-Z])(?:,|$)", re.IGNORECASE)
+DEFAULT_DIRECT_RF_QUESTIONABLE_MILES = 300
+DEFAULT_DIGIPEATED_RF_QUESTIONABLE_MILES = 700
 STATUS_PREFIXES = (
     "#",
     "ERROR!!!",
@@ -225,6 +228,39 @@ def preferred_heard_via(path: list[str], heard_via: str | None, was_direct: bool
     return raw
 
 
+def network_path_seen(path_raw: str | None, prefix: str | None) -> bool:
+    return bool((prefix and prefix.lower().startswith("ig")) or NETWORK_PATH_RE.search(str(path_raw or "")))
+
+
+def heard_category(prefix: str | None, path_raw: str | None, was_direct: bool, was_digipeated: bool) -> str:
+    if network_path_seen(path_raw, prefix):
+        return "aprs_is"
+    if prefix and RF_PREFIX_RE.match(prefix):
+        if was_direct and not was_digipeated:
+            return "direct_rf"
+        if was_digipeated:
+            return "digipeated_rf"
+    return "unknown"
+
+
+def distance_quality(distance_miles: Any, category: str, cfg: dict[str, Any]) -> str:
+    try:
+        miles = float(distance_miles)
+    except (TypeError, ValueError):
+        return "unknown"
+    if miles < 0:
+        return "questionable"
+    direct_limit = float(cfg.get("direct_rf_questionable_miles", DEFAULT_DIRECT_RF_QUESTIONABLE_MILES))
+    digi_limit = float(cfg.get("digipeated_rf_questionable_miles", DEFAULT_DIGIPEATED_RF_QUESTIONABLE_MILES))
+    if category == "direct_rf" and miles > direct_limit:
+        return "questionable"
+    if category == "digipeated_rf" and miles > digi_limit:
+        return "questionable"
+    if category in {"direct_rf", "digipeated_rf"} and miles > 150:
+        return "long_range"
+    return "normal"
+
+
 def valid_coord(lat: Any, lon: Any) -> bool:
     try:
         latitude = float(lat)
@@ -318,27 +354,35 @@ def enrich_packet(
     callsign, destination, path_raw = parsed_header if parsed_header else (None, None, None)
     path = parse_path(path_raw)
     used_digi = last_used_digipeater(path)
+    was_digipeated = bool(used_digi)
+    was_direct = not was_digipeated
     heard_via_raw = used_digi or "direct"
-    preferred_via = preferred_heard_via(path, used_digi, not bool(used_digi))
     payload = packet_payload(text)
     comment = packet_comment(payload)
     lat, lon = parse_position(text)
     station_type = infer_station_type(callsign, destination, payload, comment, text)
     heard_over_rf = bool(prefix and RF_PREFIX_RE.match(prefix))
+    category = heard_category(prefix, path_raw, was_direct, was_digipeated)
+    preferred_via = None if category == "aprs_is" else preferred_heard_via(path, used_digi, was_direct)
+    distances = range_and_bearing(station_cfg.get("lat"), station_cfg.get("lon"), lat, lon)
     metadata: dict[str, Any] = {
         "callsign": callsign,
         "source_callsign": callsign,
         "destination": destination,
         "path_raw": path_raw,
         "path": path,
-        "was_digipeated": bool(used_digi),
-        "was_direct": not bool(used_digi),
+        "was_digipeated": was_digipeated,
+        "was_direct": was_direct,
         "last_used_digipeater": used_digi,
         "heard_via": heard_via_raw,
         "heard_via_raw": heard_via_raw,
         "preferred_heard_via": preferred_via,
         "heard_transport": "rf" if heard_over_rf else "unknown",
         "heard_over_rf": heard_over_rf,
+        "heard_category": category,
+        "direct_rf_heard": category == "direct_rf",
+        "digipeated_rf_heard": category == "digipeated_rf",
+        "network_seen": category == "aprs_is",
         "gate_eligible": bool(heard_over_rf and gate_eligible),
         "likely_gated_by_me": bool(heard_over_rf and gate_eligible),
         "confirmed_gated_by_me": False,
@@ -354,7 +398,8 @@ def enrich_packet(
         metadata["is_packet_node"] = True
         metadata["importance"] = "low"
     metadata.update(parse_repeater_object(payload))
-    metadata.update(range_and_bearing(station_cfg.get("lat"), station_cfg.get("lon"), lat, lon))
+    metadata.update(distances)
+    metadata["distance_quality"] = distance_quality(metadata.get("distance_miles"), category, station_cfg)
     if last_audio:
         metadata.update(
             {

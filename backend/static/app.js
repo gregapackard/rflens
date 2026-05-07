@@ -276,15 +276,32 @@ function aprsGateLabel(metadata) {
   return "";
 }
 
+function aprsCategoryLabel(metadata) {
+  const category = String(metadata.heard_category || "").toLowerCase();
+  if (category === "direct_rf" || (metadata.direct_rf_heard === true)) return "Direct RF";
+  if (category === "digipeated_rf" || (metadata.digipeated_rf_heard === true)) return "Digipeated RF";
+  if (category === "aprs_is" || (metadata.network_seen === true)) return "APRS-IS";
+  return "";
+}
+
+function aprsDistanceQualityLabel(metadata) {
+  const quality = String(metadata.distance_quality || "").toLowerCase();
+  if (quality === "questionable") return "Questionable distance";
+  if (quality === "long_range") return "Long range";
+  return "";
+}
+
 function aprsPacketLabels(event) {
   const metadata = aprsMetadata(event);
   return [
+    aprsCategoryLabel(metadata),
     aprsTransportLabel(metadata),
     aprsDistanceLabel(metadata),
     aprsViaLabel(metadata),
     metadata.station_type ? titleCase(metadata.station_type) : "",
     aprsAudioLabel(metadata) ? `audio ${aprsAudioLabel(metadata)}` : "",
     aprsGateLabel(metadata),
+    aprsDistanceQualityLabel(metadata),
     validCoord(event.lat ?? metadata.lat, event.lon ?? metadata.lon) ? "position" : "",
   ].filter(Boolean);
 }
@@ -539,7 +556,8 @@ function filterOverviewFeedEvents(events, sources = []) {
 function insightHighlightLines(insights = {}) {
   const daily = insights.daily || {};
   return [
-    daily.farthest_aprs_station_today ? `APRS farthest heard today: ${daily.farthest_aprs_station_today}.` : "",
+    daily.farthest_direct_rf_today ? `APRS farthest direct RF today: ${daily.farthest_direct_rf_today}.` : "",
+    daily.farthest_digipeated_rf_today ? `APRS farthest digipeated RF today: ${daily.farthest_digipeated_rf_today}.` : "",
     daily.best_aprs_audio_today ? `Best APRS audio today: ${daily.best_aprs_audio_today}.` : "",
     insights.aprs?.notable?.latest_rf ? `Newest RF packet: ${insights.aprs.notable.latest_rf}.` : "",
     daily.adsb_max_range_today ? `ADS-B max range today: ${daily.adsb_max_range_today}.` : "",
@@ -630,7 +648,12 @@ function renderInsights(insights = {}) {
   const daily = insights.daily || {};
   setText("insights-daily-aprs-packets", fallbackText(daily.aprs_packets_heard_today));
   setText("insights-daily-aprs-stations", fallbackText(daily.unique_aprs_stations_heard_today));
-  setText("insights-daily-aprs-farthest", fallbackText(daily.farthest_aprs_station_today));
+  setText("insights-daily-direct-rf", fallbackText(daily.direct_rf_heard_today));
+  setText("insights-daily-digipeated-rf", fallbackText(daily.digipeated_rf_heard_today));
+  setText("insights-daily-network-seen", fallbackText(daily.network_seen_today));
+  setText("insights-daily-farthest-direct", fallbackText(daily.farthest_direct_rf_today));
+  setText("insights-daily-farthest-digipeated", fallbackText(daily.farthest_digipeated_rf_today));
+  setText("insights-daily-farthest-any-rf", fallbackText(daily.farthest_any_rf_today));
   setText("insights-daily-aprs-audio", fallbackText(daily.best_aprs_audio_today));
   setText("insights-daily-aprs-digi", fallbackText(daily.most_common_digipeater_path_today));
   setText("insights-daily-gate-eligible", fallbackText(daily.gate_eligible_today));

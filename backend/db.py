@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -920,6 +921,48 @@ def first_number(*values: Any) -> float | None:
     return None
 
 
+WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
+
+
+def clean_path_token(value: Any) -> str:
+    return str(value or "").strip().upper().rstrip("*")
+
+
+def is_wide_alias(value: Any) -> bool:
+    return bool(WIDE_ALIAS_RE.match(str(value or "").strip()))
+
+
+def metadata_path(metadata: dict[str, Any]) -> list[str]:
+    path = metadata.get("path")
+    if isinstance(path, list):
+        return [str(item).strip().upper() for item in path if str(item).strip()]
+    path_raw = str(metadata.get("path_raw") or "")
+    parts = [part.strip().upper() for part in path_raw.split(",") if part.strip()]
+    return parts[1:] if parts else []
+
+
+def preferred_heard_via(metadata: dict[str, Any]) -> str | None:
+    heard_via = clean_path_token(metadata.get("preferred_heard_via") or metadata.get("heard_via") or metadata.get("last_used_digipeater"))
+    if not heard_via or heard_via == "DIRECT":
+        return "direct" if str(metadata.get("heard_via") or "").lower() == "direct" or metadata.get("was_direct") is True else None
+    path = metadata_path(metadata)
+    if not is_wide_alias(heard_via):
+        return heard_via
+    for token in reversed(path):
+        clean = clean_path_token(token)
+        if clean and clean != heard_via and not is_wide_alias(clean):
+            return clean
+    return heard_via
+
+
+def enriched_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(metadata)
+    via = preferred_heard_via(enriched)
+    if via:
+        enriched["preferred_heard_via"] = via
+    return enriched
+
+
 def top_count(items: list[str]) -> str | None:
     counts: dict[str, int] = {}
     for item in items:
@@ -932,8 +975,53 @@ def top_count(items: list[str]) -> str | None:
     return f"{key} ({count} packets)"
 
 
+def aprs_observation_score(event: dict[str, Any], metadata: dict[str, Any]) -> tuple[int, str]:
+    score = 0
+    if as_float(metadata.get("distance_miles")) is not None or valid_coord(event.get("lat") or metadata.get("lat"), event.get("lon") or metadata.get("lon")):
+        score += 80
+    station_type = str(metadata.get("station_type") or "station")
+    if station_type == "repeater_object":
+        score += 75
+    elif station_type in {"digipeater", "igate", "aircraft", "mobile_digipeater"}:
+        score += 60
+    elif station_type != "station":
+        score += 35
+    if as_float(metadata.get("audio_level")) is not None:
+        score += 25
+    if preferred_heard_via(metadata) and preferred_heard_via(metadata) != "direct":
+        score += 15
+    destination = str(metadata.get("destination") or "").upper()
+    if destination == "ID":
+        score -= 90
+    if score == 0:
+        score -= 20
+    return score, str(event.get("timestamp") or "")
+
+
+def prioritized_aprs_events(events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]], limit: int = 8) -> list[dict[str, Any]]:
+    best_by_callsign: dict[str, tuple[dict[str, Any], dict[str, Any], tuple[int, str]]] = {}
+    for event, metadata in events_with_metadata:
+        callsign = str(event.get("callsign") or metadata.get("source_callsign") or metadata.get("object_name") or "").strip()
+        if not callsign:
+            continue
+        scored = aprs_observation_score(event, metadata)
+        current = best_by_callsign.get(callsign)
+        if current is None or scored > current[2]:
+            best_by_callsign[callsign] = (event, metadata, scored)
+    ordered = sorted(
+        best_by_callsign.values(),
+        key=lambda item: (
+            item[2][0],
+            as_float(item[1].get("distance_miles")) or -1,
+            item[2][1],
+        ),
+        reverse=True,
+    )
+    return [event for event, _metadata, _score in ordered[:limit]]
+
+
 def aprs_event_sentence(event: dict[str, Any]) -> str:
-    metadata = parse_metadata_payload(event.get("metadata_json"))
+    metadata = enriched_metadata(parse_metadata_payload(event.get("metadata_json")))
     callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
     station_type = station_type_label(metadata.get("station_type"))
     if metadata.get("station_type") == "repeater_object":
@@ -949,7 +1037,7 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
     distance = format_distance_miles(metadata.get("distance_miles"))
     if distance:
         parts.append(f"{distance} away")
-    heard_via = metadata.get("heard_via")
+    heard_via = metadata.get("preferred_heard_via") or metadata.get("heard_via")
     if heard_via and heard_via != "direct":
         parts.append(f"via {heard_via}")
     elif metadata.get("was_direct") is True or heard_via == "direct":
@@ -997,8 +1085,8 @@ def fetch_insights() -> dict[str, Any]:
         (today_start,),
     )
 
-    aprs_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in aprs_recent]
-    aprs_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in aprs_today]
+    aprs_with_metadata = [(event, enriched_metadata(parse_metadata_payload(event.get("metadata_json")))) for event in aprs_recent]
+    aprs_today_with_metadata = [(event, enriched_metadata(parse_metadata_payload(event.get("metadata_json")))) for event in aprs_today]
     adsb_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in adsb_today]
 
     farthest_aprs = max(
@@ -1024,14 +1112,14 @@ def fetch_insights() -> dict[str, Any]:
     latest_aprs = aprs_recent[0] if aprs_recent else None
     latest_metadata = parse_metadata_payload(latest_aprs.get("metadata_json")) if latest_aprs else {}
     top_digi = top_count([
-        str(metadata.get("heard_via") or "")
+        str(metadata.get("preferred_heard_via") or "")
         for _event, metadata in aprs_with_metadata
-        if metadata.get("heard_via") and metadata.get("heard_via") != "direct"
+        if metadata.get("preferred_heard_via") and metadata.get("preferred_heard_via") != "direct"
     ])
     top_digi_today = top_count([
-        str(metadata.get("heard_via") or "")
+        str(metadata.get("preferred_heard_via") or "")
         for _event, metadata in aprs_today_with_metadata
-        if metadata.get("heard_via") and metadata.get("heard_via") != "direct"
+        if metadata.get("preferred_heard_via") and metadata.get("preferred_heard_via") != "direct"
     ])
 
     adsb_ranges = [value for value in (as_float(metadata.get("r_dst")) for _event, metadata in adsb_today_with_metadata) if value is not None]
@@ -1056,7 +1144,7 @@ def fetch_insights() -> dict[str, Any]:
     if farthest_aprs[0] and farthest_aprs[2] is not None:
         summary.append(f"The farthest APRS station heard was {farthest_aprs[0].get('callsign')} at approximately {farthest_aprs[2]:.0f} miles.")
     if latest_aprs:
-        via = latest_metadata.get("heard_via")
+        via = preferred_heard_via(latest_metadata)
         via_text = f" via {via}" if via and via != "direct" else " directly" if via == "direct" else ""
         summary.append(f"Most recent RF APRS packet was {latest_aprs.get('callsign')}{via_text}.")
     if best_audio[0] and best_audio[2] is not None:
@@ -1064,7 +1152,7 @@ def fetch_insights() -> dict[str, Any]:
     if not summary:
         summary.append("RF Lens is waiting for fresh APRS or ADS-B observations to summarize.")
 
-    aprs_plain = [aprs_event_sentence(event) for event in aprs_recent[:8]]
+    aprs_plain = [aprs_event_sentence(event) for event in prioritized_aprs_events(aprs_with_metadata)]
     adsb_plain: list[str] = []
     if records.get("adsb_max_range"):
         adsb_plain.append(f"Your farthest ADS-B aircraft record is {records['adsb_max_range'].get('value_text')}.")
@@ -1118,9 +1206,15 @@ def fetch_insights() -> dict[str, Any]:
                     else None
                 ),
                 "latest_rf": (
-                    f"{latest_aprs.get('callsign')} via {latest_metadata.get('heard_via')}"
-                    if latest_aprs and latest_metadata.get("heard_via")
-                    else latest_aprs.get("callsign") if latest_aprs else None
+                    (
+                        f"{latest_aprs.get('callsign')} via {preferred_heard_via(latest_metadata)}"
+                        if preferred_heard_via(latest_metadata) and preferred_heard_via(latest_metadata) != "direct"
+                        else f"{latest_aprs.get('callsign')} directly"
+                        if preferred_heard_via(latest_metadata) == "direct"
+                        else latest_aprs.get("callsign")
+                    )
+                    if latest_aprs
+                    else None
                 ),
                 "top_digipeater": top_digi,
             },

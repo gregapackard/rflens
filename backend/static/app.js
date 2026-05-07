@@ -227,9 +227,38 @@ function aprsDistanceLabel(metadata) {
   return Number.isFinite(miles) ? `${miles.toFixed(0)} mi` : "";
 }
 
+function cleanPathToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/\*$/, "");
+}
+
+function isWideAlias(value) {
+  return /^WIDE\d*(?:-\d+)?\*?$/i.test(String(value || "").trim());
+}
+
+function metadataPath(metadata) {
+  if (Array.isArray(metadata.path)) return metadata.path.map(cleanPathToken).filter(Boolean);
+  const parts = String(metadata.path_raw || "").split(",").map(cleanPathToken).filter(Boolean);
+  return parts.length ? parts.slice(1) : [];
+}
+
+function preferredHeardVia(metadata) {
+  const explicit = cleanPathToken(metadata.preferred_heard_via || metadata.heard_via || metadata.last_used_digipeater);
+  if (!explicit || explicit === "DIRECT") {
+    return metadata.was_direct === true || String(metadata.heard_via || "").toLowerCase() === "direct" ? "direct" : "";
+  }
+  if (!isWideAlias(explicit)) return explicit;
+  const path = metadataPath(metadata);
+  for (let index = path.length - 1; index >= 0; index -= 1) {
+    const token = path[index];
+    if (token && token !== explicit && !isWideAlias(token)) return token;
+  }
+  return explicit;
+}
+
 function aprsViaLabel(metadata) {
-  if (metadata.heard_via && metadata.heard_via !== "direct") return `via ${metadata.heard_via}`;
-  if (metadata.was_direct === true || metadata.heard_via === "direct") return "direct";
+  const via = preferredHeardVia(metadata);
+  if (via && via !== "direct") return `via ${via}`;
+  if (via === "direct") return "direct";
   return "";
 }
 
@@ -498,7 +527,18 @@ function filterOverviewFeedEvents(events, sources = []) {
   return filteredEvents;
 }
 
-function renderOverviewFeed(events, sources, targetId, limit = 20) {
+function insightHighlightLines(insights = {}) {
+  const daily = insights.daily || {};
+  return [
+    daily.farthest_aprs_station_today ? `APRS farthest heard today: ${daily.farthest_aprs_station_today}.` : "",
+    daily.best_aprs_audio_today ? `Best APRS audio today: ${daily.best_aprs_audio_today}.` : "",
+    insights.aprs?.notable?.latest_rf ? `Newest RF packet: ${insights.aprs.notable.latest_rf}.` : "",
+    daily.adsb_max_range_today ? `ADS-B max range today: ${daily.adsb_max_range_today}.` : "",
+    daily.adsb_highest_altitude_today ? `ADS-B highest altitude today: ${daily.adsb_highest_altitude_today}.` : "",
+  ].filter(Boolean);
+}
+
+function renderOverviewFeed(events, sources, targetId, limit = 20, insights = {}) {
   const filtered = filterOverviewFeedEvents(events, sources);
   const html = filtered.slice(0, limit).map((event) => {
     const isNew = state.initialized && !state.seenEvents.has(event.id);
@@ -512,15 +552,25 @@ function renderOverviewFeed(events, sources, targetId, limit = 20) {
       </div>
     `;
   }).join("");
+  const highlightLines = insightHighlightLines(insights);
   setHtml(targetId, html || `
-    <div class="feed-row">
-      <time>normal</time>
-      <strong>All systems normal</strong>
-      <span>quiet</span>
-      <p>No significant RF events detected</p>
-    </div>
+    ${highlightLines.length ? highlightLines.slice(0, 5).map((line) => `
+      <div class="feed-row">
+        <time>today</time>
+        <strong>${esc(line.split(":")[0])}</strong>
+        <span>insight</span>
+        <p>${esc(line)}</p>
+      </div>
+    `).join("") : `
+      <div class="feed-row">
+        <time>waiting</time>
+        <strong>RF Lens is listening</strong>
+        <span>insight</span>
+        <p>No notable APRS or ADS-B observations are available yet</p>
+      </div>
+    `}
   `);
-  return filtered.length;
+  return filtered.length || highlightLines.length;
 }
 
 function renderEvents(events, sources) {
@@ -697,7 +747,10 @@ function renderAprsCard(aprs, aprsStatus = {}) {
     .sort((a, b) => b.miles - a.miles)[0];
   const directCount = enriched.filter((item) => item.metadata.was_direct === true || item.metadata.heard_via === "direct").length;
   const digipeatedCount = enriched.filter((item) => item.metadata.was_digipeated === true || (item.metadata.heard_via && item.metadata.heard_via !== "direct")).length;
-  const topDigi = summarizeCounts(countBy(enriched.filter((item) => item.metadata.heard_via && item.metadata.heard_via !== "direct"), (item) => item.metadata.heard_via), 1);
+  const topDigi = summarizeCounts(countBy(enriched.filter((item) => {
+    const via = preferredHeardVia(item.metadata);
+    return via && via !== "direct";
+  }), (item) => preferredHeardVia(item.metadata)), 1);
   const stationCount = Number(aprsStatus.unique_callsigns_seen);
   const heardTotal = Number(aprsStatus.rf_packets_heard_total);
   const lastAudio = Number(aprsStatus.last_audio_level);
@@ -774,9 +827,19 @@ function renderSystemCard(system, sources) {
   setMany(["dash-system-warnings", "overview-system-warnings"], warnings.length);
 }
 
-function renderHighlights({ records }) {
+function renderHighlights({ records, insights }) {
   const byType = recordByType(records);
-  const html = RECORD_DEFINITIONS.map((definition) => {
+  const insightCards = insightHighlightLines(insights).map((line) => {
+    const [title, ...rest] = line.split(":");
+    return `
+      <section class="highlight-card">
+        <h3>${esc(title)}</h3>
+        <strong>${esc(rest.join(":").trim() || line)}</strong>
+        <span>Insight</span>
+      </section>
+    `;
+  });
+  const html = insightCards.concat(RECORD_DEFINITIONS.map((definition) => {
     const record = byType[definition.record_type];
     const value = record?.value_text || (record?.value != null ? record.value : "No data yet");
     const detail = record?.callsign || (record?.timestamp ? fmtDateTime(record.timestamp) : "Waiting for an event");
@@ -787,7 +850,7 @@ function renderHighlights({ records }) {
         <span>${esc(detail)}</span>
       </button>
     `;
-  }).join("");
+  })).join("");
   setHtml("highlight-grid", html);
 }
 
@@ -941,10 +1004,10 @@ function renderOverview({ sources, adsb, aprs, aprsStatus, captures, events, sys
   renderAprsCard(aprs, aprsStatus);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
-  renderHighlights({ records });
+  renderHighlights({ records, insights });
   renderRecordsAndAlerts({ sources, adsb, aprs, captures, system });
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
-  setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
+  setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20, insights));
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);
 }
 
@@ -1054,6 +1117,15 @@ async function getAprsStatus() {
   }
 }
 
+async function getInsights() {
+  try {
+    return await getJson("/api/insights");
+  } catch (error) {
+    console.warn("Insights fetch failed", error);
+    return state.insights || {};
+  }
+}
+
 async function refreshData() {
   try {
     const [station, adsbUi, sources, adsb, aprs, aprsStatus, insights, captures, events, system, records] = await Promise.all([
@@ -1063,7 +1135,7 @@ async function refreshData() {
       getJson(`/api/adsb/recent?limit=${DATA_FETCH_LIMIT}`),
       getJson(`/api/aprs/recent?limit=${DATA_FETCH_LIMIT}`),
       getAprsStatus(),
-      getJson("/api/insights"),
+      getInsights(),
       getJson("/api/captures"),
       getJson(`/api/events/recent?limit=${EVENT_FEED_LIMIT}`),
       getJson("/api/system"),

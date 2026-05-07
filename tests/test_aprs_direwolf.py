@@ -5,6 +5,7 @@ import backend.db as db
 from backend.ingestors.aprs_direwolf import (
     decoded_followup_metadata,
     enrich_packet,
+    followup_boundary,
     parse_decoded_followup_line,
     parse_gate_confirmation,
 )
@@ -114,7 +115,7 @@ class AprsDirewolfParserTests(unittest.TestCase):
 
     def test_decoded_followup_extracts_position_and_motion_fields(self):
         decoded = parse_decoded_followup_line(
-            "MIC-E: En Route, 39 58.07 N 082 59.93 W, 35 MPH, course 123, altitude 902 ft, manufacturer=Kenwood"
+            "N 39 58.0700, W 082 59.9300, 35 MPH, course 123, altitude 902 ft, manufacturer=Kenwood"
         )
 
         self.assertIsNotNone(decoded)
@@ -123,8 +124,41 @@ class AprsDirewolfParserTests(unittest.TestCase):
         self.assertEqual(decoded["speed_mph"], 35.0)
         self.assertEqual(decoded["course_degrees"], 123)
         self.assertEqual(decoded["altitude_ft"], 902)
-        self.assertEqual(decoded["mic_e_status"], "En Route")
         self.assertEqual(decoded["manufacturer"], "Kenwood")
+
+    def test_mic_e_summary_then_coordinate_line_fills_missing_position(self):
+        existing = {
+            "heard_category": "digipeated_rf",
+            "payload": "`nNBmHF>/`\"6n}_%",
+            "lat": None,
+            "lon": None,
+        }
+        summary = decoded_followup_metadata(
+            "MIC-E, normal car (side view), Yaesu FTM-400DR, Off Duty",
+            existing,
+            STATION,
+        )
+        self.assertIsNotNone(summary)
+        summary_updates, summary_lat, summary_lon = summary
+        existing.update(summary_updates)
+        self.assertIsNone(summary_lat)
+        self.assertIsNone(summary_lon)
+
+        decoded = decoded_followup_metadata(
+            "N 40 02.5600, W 082 47.3700, 74 km/h (46 MPH), course 92, alt 316 m (1037 ft)",
+            existing,
+            STATION,
+        )
+
+        self.assertIsNotNone(decoded)
+        updates, lat, lon = decoded
+        self.assertAlmostEqual(lat, 40.042667, places=5)
+        self.assertAlmostEqual(lon, -82.7895, places=5)
+        self.assertEqual(updates["speed_mph"], 46.0)
+        self.assertEqual(updates["course_degrees"], 92)
+        self.assertEqual(updates["altitude_ft"], 1037)
+        self.assertEqual(updates["distance_quality"], "normal")
+        self.assertEqual(len(updates["decoded_followup_lines"]), 2)
 
     def test_unrelated_lines_do_not_parse_as_decoded_followup(self):
         self.assertIsNone(parse_decoded_followup_line("K8LU-9 audio level = 50(20/10) [+++]"))
@@ -134,6 +168,7 @@ class AprsDirewolfParserTests(unittest.TestCase):
         self.assertIsNone(parse_decoded_followup_line("[0.2] KD8NVS-1>APRS:!4000.00N/08300.00W-test"))
         self.assertIsNone(parse_decoded_followup_line("[ig] KD8NVS-1>APRS,TCPIP*,qAR,OTHER-10:!4000.00N/08300.00W-test"))
         self.assertIsNone(parse_decoded_followup_line("[ig>tx] KD8NVS-1>APRS,WIDE1-1:!4000.00N/08300.00W-test"))
+        self.assertIsNone(parse_decoded_followup_line("Tell the sender (K8QIK-2) to use the proper product identifier..."))
 
     def test_prefixed_decoded_followup_still_parses(self):
         decoded = parse_decoded_followup_line(
@@ -146,6 +181,27 @@ class AprsDirewolfParserTests(unittest.TestCase):
         self.assertEqual(decoded["speed_mph"], 35.0)
         self.assertEqual(decoded["course_degrees"], 123)
 
+    def test_followup_boundaries_close_previous_packet_block(self):
+        self.assertTrue(followup_boundary(""))
+        self.assertTrue(followup_boundary("[0.2] K8LU-9 audio level = 50(20/10) [+++]"))
+        self.assertTrue(followup_boundary("[0.2] KD8NVS-1>APRS:!4000.00N/08300.00W-test"))
+        self.assertTrue(followup_boundary("[ig] KD8NVS-1>APRS,TCPIP*,qAR,OTHER-10:!4000.00N/08300.00W-test"))
+        self.assertTrue(followup_boundary("ERROR!!! something unrelated"))
+        self.assertFalse(followup_boundary("MIC-E, normal car (side view), Yaesu FTM-400DR, Off Duty"))
+        self.assertFalse(followup_boundary("N 40 02.5600, W 082 47.3700, 74 km/h (46 MPH), course 92"))
+
+    def test_repeater_followup_position_does_not_use_frequency_as_longitude(self):
+        decoded = parse_decoded_followup_line("N 40 46.9100, W 081 53.2600, 147.210 MHz, PL 88.5")
+
+        self.assertIsNotNone(decoded)
+        self.assertAlmostEqual(decoded["decoded_lat"], 40.781833, places=5)
+        self.assertAlmostEqual(decoded["decoded_lon"], -81.887667, places=5)
+        self.assertNotEqual(decoded["decoded_lat"], 53.26)
+        self.assertNotEqual(decoded["decoded_lon"], 147.21)
+
+    def test_broad_decimal_pairs_do_not_parse_as_decoded_coordinates(self):
+        self.assertIsNone(parse_decoded_followup_line("W 081 53.2600, 147.210 MHz, PL 88.5"))
+
     def test_decoded_followup_metadata_fills_missing_position_only(self):
         existing = {
             "heard_category": "digipeated_rf",
@@ -153,14 +209,14 @@ class AprsDirewolfParserTests(unittest.TestCase):
             "lon": None,
         }
         decoded = decoded_followup_metadata(
-            "MIC-E: En Route, 39 58.07 N 082 59.93 W, 35 MPH, course 123",
+            "N 39 58.0700, W 082 59.9300, 35 MPH, course 123",
             existing,
             STATION,
         )
 
         self.assertIsNotNone(decoded)
         updates, lat, lon = decoded
-        self.assertEqual(updates["decoded_followup_lines"][0], "MIC-E: En Route, 39 58.07 N 082 59.93 W, 35 MPH, course 123")
+        self.assertEqual(updates["decoded_followup_lines"][0], "N 39 58.0700, W 082 59.9300, 35 MPH, course 123")
         self.assertAlmostEqual(lat, 39.967833, places=5)
         self.assertAlmostEqual(lon, -82.998833, places=5)
         self.assertIn("distance_miles", updates)
@@ -171,7 +227,7 @@ class AprsDirewolfParserTests(unittest.TestCase):
             "lon": -83.0,
         }
         decoded_existing = decoded_followup_metadata(
-            "MIC-E: En Route, 39 58.07 N 082 59.93 W",
+            "N 39 58.0700, W 082 59.9300",
             existing_position,
             STATION,
         )
@@ -179,7 +235,7 @@ class AprsDirewolfParserTests(unittest.TestCase):
         updates_existing, lat_existing, lon_existing = decoded_existing
         self.assertIsNone(lat_existing)
         self.assertIsNone(lon_existing)
-        self.assertEqual(updates_existing["decoded_lat"], 39.967833)
+        self.assertNotIn("decoded_lat", updates_existing)
 
     def test_update_aprs_event_metadata_preserves_existing_position(self):
         original_get_database_path = db.get_database_path

@@ -41,15 +41,19 @@ WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
 Q_CONSTRUCT_RE = re.compile(r",qA[A-Z],([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)", re.IGNORECASE)
 NETWORK_PATH_RE = re.compile(r"(?:^|,)(?:TCPIP\*?|qA[A-Z])(?:,|$)", re.IGNORECASE)
 POSITION_MOTION_RE = re.compile(r"\d{3}/\d{3}")
-DECODED_POSITION_RE = re.compile(
+DECODED_TRAILING_HEMI_POSITION_RE = re.compile(
     r"(?P<lat_deg>\d{1,2})[^\dA-Z]+(?P<lat_min>\d{1,2}\.\d+)\s*(?P<lat_hemi>[NS])"
     r".*?"
     r"(?P<lon_deg>\d{1,3})[^\dA-Z]+(?P<lon_min>\d{1,2}\.\d+)\s*(?P<lon_hemi>[EW])",
     re.IGNORECASE,
 )
-DECODED_DECIMAL_POSITION_RE = re.compile(
-    r"\b(?:lat(?:itude)?\s*[=: ]\s*)?(?P<lat>[+-]?\d{1,2}\.\d+)\s*,\s*"
-    r"(?:lon(?:gitude)?\s*[=: ]\s*)?(?P<lon>[+-]?\d{1,3}\.\d+)\b",
+DECODED_PREFIX_HEMI_POSITION_RE = re.compile(
+    r"^\s*(?P<lat_hemi>[NS])\s+"
+    r"(?P<lat_deg>\d{1,2})\s+"
+    r"(?P<lat_min>\d{1,2}\.\d+)\s*,\s*"
+    r"(?P<lon_hemi>[EW])\s+"
+    r"(?P<lon_deg>\d{1,3})\s+"
+    r"(?P<lon_min>\d{1,2}\.\d+)\b",
     re.IGNORECASE,
 )
 SPEED_RE = re.compile(r"\b(?:speed\s*)?(?P<speed>\d{1,3}(?:\.\d+)?)\s*(?P<unit>mph|knots?|kts?|kt)\b", re.IGNORECASE)
@@ -68,6 +72,11 @@ DECODED_KEYWORDS = (
     "manufacturer",
     "device",
     "symbol",
+)
+IGNORED_FOLLOWUP_PHRASES = (
+    "tell the sender",
+    "use of id",
+    "error!!!",
 )
 RECENT_PACKET_FOLLOWUP_SECONDS = 4
 DEFAULT_DIRECT_RF_QUESTIONABLE_MILES = 300
@@ -133,6 +142,18 @@ def parse_audio_line(text: str) -> dict[str, Any] | None:
         "source_callsign": callsign_match.group(1).upper() if callsign_match else None,
         "timestamp": utc_now(),
     }
+
+
+def followup_boundary(line: str) -> bool:
+    prefix, text = split_prefix(line)
+    if not text:
+        return True
+    return bool(
+        ignored_prefix(prefix)
+        or parse_audio_line(text)
+        or status_or_help_line(text)
+        or packet_like(line)
+    )
 
 
 def configured_aprs_callsign(config: dict[str, Any] | None = None) -> str:
@@ -260,7 +281,7 @@ def parse_position(text: str) -> tuple[float | None, float | None]:
 
 
 def parse_decoded_position(text: str) -> tuple[float | None, float | None]:
-    match = DECODED_POSITION_RE.search(text)
+    match = DECODED_PREFIX_HEMI_POSITION_RE.search(text) or DECODED_TRAILING_HEMI_POSITION_RE.search(text)
     if match:
         lat = int(match.group("lat_deg")) + float(match.group("lat_min")) / 60
         lon = int(match.group("lon_deg")) + float(match.group("lon_min")) / 60
@@ -269,12 +290,6 @@ def parse_decoded_position(text: str) -> tuple[float | None, float | None]:
         if match.group("lon_hemi").upper() == "W":
             lon *= -1
         return lat, lon
-    decimal = DECODED_DECIMAL_POSITION_RE.search(text)
-    if decimal:
-        lat = float(decimal.group("lat"))
-        lon = float(decimal.group("lon"))
-        if valid_coord(lat, lon):
-            return lat, lon
     return None, None
 
 
@@ -415,9 +430,11 @@ def parse_decoded_followup_line(text: str) -> dict[str, Any] | None:
         return None
     if ignored_prefix(prefix):
         return None
-    if parse_packet_header(line) or parse_audio_line(line) or aprs_is_status_line(line):
-        return None
     lowered = line.lower()
+    if parse_packet_header(line) or parse_audio_line(line) or aprs_is_status_line(line) or status_or_help_line(line):
+        return None
+    if any(phrase in lowered for phrase in IGNORED_FOLLOWUP_PHRASES):
+        return None
     lat, lon = parse_decoded_position(line)
     decoded: dict[str, Any] = {}
     if lat is not None and lon is not None:
@@ -455,6 +472,12 @@ def parse_decoded_followup_line(text: str) -> dict[str, Any] | None:
     return decoded
 
 
+def metadata_is_mic_e(metadata: dict[str, Any]) -> bool:
+    payload = str(metadata.get("payload") or "")
+    decoded_text = str(metadata.get("direwolf_decoded_text") or "")
+    return bool(payload[:1] in {"`", "'"} or "mic-e" in decoded_text.lower())
+
+
 def decoded_followup_metadata(
     line: str,
     existing_metadata: dict[str, Any],
@@ -467,6 +490,11 @@ def decoded_followup_metadata(
     raw_line = decoded.pop("decoded_followup_line")
     if raw_line not in followup_lines:
         followup_lines.append(raw_line)
+    is_mic_e = metadata_is_mic_e(existing_metadata) or "mic-e" in raw_line.lower()
+    original_has_position = existing_metadata.get("lat") is not None and existing_metadata.get("lon") is not None
+    if original_has_position and not is_mic_e:
+        decoded.pop("decoded_lat", None)
+        decoded.pop("decoded_lon", None)
     updates: dict[str, Any] = {
         "decoded_followup_lines": followup_lines[-8:],
         "direwolf_decoded_text": " ".join(followup_lines[-8:]),
@@ -474,13 +502,20 @@ def decoded_followup_metadata(
     }
     lat = decoded.get("decoded_lat")
     lon = decoded.get("decoded_lon")
-    update_lat = float(lat) if lat is not None and existing_metadata.get("lat") is None else None
-    update_lon = float(lon) if lon is not None and existing_metadata.get("lon") is None else None
+    update_lat = float(lat) if lat is not None and existing_metadata.get("lat") is None and valid_coord(lat, lon) else None
+    update_lon = float(lon) if lon is not None and existing_metadata.get("lon") is None and valid_coord(lat, lon) else None
     if update_lat is not None and update_lon is not None:
         category = str(existing_metadata.get("heard_category") or "unknown")
         distances = range_and_bearing(station_cfg.get("lat"), station_cfg.get("lon"), update_lat, update_lon)
-        updates.update(distances)
-        updates["distance_quality"] = distance_quality(updates.get("distance_miles"), category, station_cfg)
+        quality = distance_quality(distances.get("distance_miles"), category, station_cfg)
+        if quality == "questionable":
+            updates.pop("decoded_lat", None)
+            updates.pop("decoded_lon", None)
+            update_lat = None
+            update_lon = None
+        else:
+            updates.update(distances)
+            updates["distance_quality"] = quality
     return updates, update_lat, update_lon
 
 
@@ -710,6 +745,7 @@ def run_forever() -> None:
 
     for line in follow(path):
         if not line:
+            recent_packet = None
             last_source_touch_at = touch_source_if_due(
                 source_id,
                 "missing" if not path.exists() else "online",
@@ -717,6 +753,8 @@ def run_forever() -> None:
             )
             continue
         prefix, text = split_prefix(line)
+        if recent_packet and followup_boundary(line):
+            recent_packet = None
         if ignored_prefix(prefix):
             ignored_igate_lines += 1
             confirmation = parse_gate_confirmation(prefix, text, local_callsign)
@@ -756,6 +794,13 @@ def run_forever() -> None:
                     if update_lon is not None:
                         recent_packet["metadata"]["lon"] = update_lon
                     last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
+                    line_lat, line_lon = parse_decoded_position(text)
+                    if (
+                        (update_lat is not None and update_lon is not None)
+                        or (line_lat is not None and line_lon is not None)
+                        or any(key in metadata_updates for key in ("speed_mph", "speed_knots", "course_degrees", "altitude_ft"))
+                    ):
+                        recent_packet = None
                     continue
         if status_or_help_line(text):
             ignored_status_lines += 1
@@ -770,6 +815,7 @@ def run_forever() -> None:
             last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         if not packet_like(line):
+            recent_packet = None
             continue
         parsed = enrich_packet(line, last_audio, station_cfg, aprs_is_connected and aprs_is_verified)
         packet_line = str(parsed.get("line") or "")

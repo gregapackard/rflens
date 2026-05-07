@@ -570,7 +570,8 @@ def run_forever() -> None:
     aprs_is_connected = False
     aprs_is_verified = False
     reset_aprs_status(local_callsign)
-    hydrate_aprs_status_from_recent_events(local_callsign)
+    hydrated_status = hydrate_aprs_status_from_recent_events(local_callsign)
+    rf_packets_heard_total = int(hydrated_status.get("rf_packets_heard_total") or 0)
 
     for line in follow(path):
         if not line:

@@ -1,5 +1,7 @@
 import unittest
+from pathlib import Path
 
+import backend.db as db
 from backend.ingestors.aprs_direwolf import enrich_packet, parse_gate_confirmation
 
 
@@ -63,6 +65,47 @@ class AprsDirewolfParserTests(unittest.TestCase):
         self.assertEqual(digipeated["preferred_heard_via"], "K8QIK-2")
         self.assertEqual(network["heard_category"], "aprs_is")
         self.assertFalse(network["heard_over_rf"])
+
+    def test_aprs_status_hydrates_rf_total_without_network_side_packets(self):
+        original_get_database_path = db.get_database_path
+        test_db = Path.cwd() / "data" / "test-aprs-status.db"
+        db.get_database_path = lambda config=None: test_db
+        try:
+            test_db.parent.mkdir(parents=True, exist_ok=True)
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(f"{test_db}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            db.init_db(test_db)
+            db.reset_aprs_status("KF8GBU-10")
+            db.insert_event(
+                event_type="aprs_packet",
+                callsign="KD8NVS-1",
+                metadata={"heard_category": "direct_rf", "heard_over_rf": True},
+            )
+            db.insert_event(
+                event_type="aprs_packet",
+                callsign="KC3ZLD-10",
+                metadata={"heard_category": "digipeated_rf", "heard_over_rf": True},
+            )
+            db.insert_event(
+                event_type="aprs_packet",
+                callsign="NET-1",
+                metadata={"heard_category": "aprs_is", "network_seen": True, "heard_over_rf": False},
+            )
+
+            hydrated = db.hydrate_aprs_status_from_recent_events("KF8GBU-10")
+            status = db.fetch_aprs_status()
+        finally:
+            db.get_database_path = original_get_database_path
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(f"{test_db}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+
+        self.assertEqual(hydrated["rf_packets_heard_total"], 2)
+        self.assertEqual(status["rf_packets_heard_total"], 2)
+        self.assertEqual(status["unique_callsigns_seen"], 2)
 
 
 if __name__ == "__main__":

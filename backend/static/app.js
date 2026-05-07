@@ -210,6 +210,24 @@ function titleCase(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function stationTypeLabel(value) {
+  const text = String(value || "").toLowerCase();
+  const labels = {
+    igate: "iGate",
+    digipeater: "Digi",
+    likely_igate: "Likely iGate",
+    possible_digipeater: "Possible Digi",
+    mobile: "Mobile",
+    handheld: "Handheld",
+    weather: "Weather",
+    repeater_object: "Repeater object",
+    aircraft: "Aircraft",
+    packet_node: "Packet node",
+    ax25_node: "AX.25 node",
+  };
+  return labels[text] || titleCase(value);
+}
+
 function aprsMetadata(event) {
   return parseMetadata(event);
 }
@@ -298,7 +316,7 @@ function aprsPacketLabels(event) {
     aprsTransportLabel(metadata),
     aprsDistanceLabel(metadata),
     aprsViaLabel(metadata),
-    metadata.station_type ? titleCase(metadata.station_type) : "",
+    metadata.station_type ? stationTypeLabel(metadata.station_type) : "",
     aprsAudioLabel(metadata) ? `audio ${aprsAudioLabel(metadata)}` : "",
     aprsGateLabel(metadata),
     aprsDistanceQualityLabel(metadata),

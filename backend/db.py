@@ -960,12 +960,63 @@ def first_number(*values: Any) -> float | None:
 
 WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
 NETWORK_PATH_RE = re.compile(r"(?:^|,)(?:TCPIP\*?|qA[A-Z])(?:,|$)", re.IGNORECASE)
+POSITION_MOTION_RE = re.compile(r"\d{3}/\d{3}")
 DIRECT_RF_QUESTIONABLE_MILES = 300
 DIGIPEATED_RF_QUESTIONABLE_MILES = 700
+SSID_HINTS = {
+    1: "possible_digipeater_or_secondary",
+    3: "likely_weather",
+    7: "likely_handheld",
+    9: "likely_mobile",
+    10: "likely_igate_or_internet",
+    11: "possible_balloon_or_aircraft",
+    15: "possible_hf_or_misc",
+}
 
 
 def clean_path_token(value: Any) -> str:
     return str(value or "").strip().upper().rstrip("*")
+
+
+def parse_callsign_ssid(callsign: Any) -> tuple[str | None, int | None]:
+    text = str(callsign or "").upper().strip()
+    if not text:
+        return None, None
+    if "-" not in text:
+        return text, None
+    base, suffix = text.rsplit("-", 1)
+    try:
+        return base, int(suffix)
+    except ValueError:
+        return base, None
+
+
+def ssid_hint(ssid: int | None) -> str | None:
+    return SSID_HINTS.get(ssid)
+
+
+def infer_station_type_from_ssid(metadata: dict[str, Any]) -> tuple[str | None, str | None]:
+    ssid = metadata.get("ssid")
+    try:
+        ssid_number = int(ssid) if ssid is not None else None
+    except (TypeError, ValueError):
+        ssid_number = None
+    payload = str(metadata.get("payload") or metadata.get("line") or "").lower()
+    if ssid_number == 9 and POSITION_MOTION_RE.search(payload):
+        return "mobile", "medium"
+    if ssid_number == 11:
+        return "aircraft", "low"
+    if ssid_number == 9:
+        return "mobile", "low"
+    if ssid_number == 7:
+        return "handheld", "low"
+    if ssid_number == 3:
+        return "weather", "low"
+    if ssid_number == 10:
+        return "likely_igate", "low"
+    if ssid_number == 1:
+        return "possible_digipeater", "low"
+    return None, None
 
 
 def is_wide_alias(value: Any) -> bool:
@@ -1035,6 +1086,11 @@ def infer_distance_quality(metadata: dict[str, Any], category: str) -> str:
 
 def enriched_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(metadata)
+    base, parsed_ssid = parse_callsign_ssid(enriched.get("source_callsign") or enriched.get("callsign"))
+    enriched.setdefault("base_callsign", base)
+    if "ssid" not in enriched and parsed_ssid is not None:
+        enriched["ssid"] = parsed_ssid
+    enriched.setdefault("ssid_hint", ssid_hint(enriched.get("ssid")))
     via = preferred_heard_via(enriched)
     if via:
         enriched["preferred_heard_via"] = via
@@ -1046,6 +1102,14 @@ def enriched_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     enriched["digipeated_rf_heard"] = category == "digipeated_rf"
     enriched["network_seen"] = category == "aprs_is"
     enriched["distance_quality"] = infer_distance_quality(enriched, category)
+    station_type = str(enriched.get("station_type") or "station")
+    if station_type == "station":
+        inferred_type, confidence = infer_station_type_from_ssid(enriched)
+        if inferred_type:
+            enriched["station_type"] = inferred_type
+            enriched["station_type_confidence"] = confidence
+    else:
+        enriched.setdefault("station_type_confidence", "high")
     if enriched.get("heard_over_rf") is True:
         enriched["aprs_is_connected_at_heard"] = bool(enriched.get("gate_eligible"))
         enriched["gate_confirmed"] = enriched.get("confirmed_gated_by_me") is True

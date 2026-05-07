@@ -38,8 +38,18 @@ AIRCRAFT_SOURCE_RE = re.compile(r"^N[0-9]{1,5}[A-Z]{0,2}(?:-\d{1,2})?$", re.IGNO
 WIDE_ALIAS_RE = re.compile(r"^WIDE\d*(?:-\d+)?\*?$", re.IGNORECASE)
 Q_CONSTRUCT_RE = re.compile(r",qA[A-Z],([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)", re.IGNORECASE)
 NETWORK_PATH_RE = re.compile(r"(?:^|,)(?:TCPIP\*?|qA[A-Z])(?:,|$)", re.IGNORECASE)
+POSITION_MOTION_RE = re.compile(r"\d{3}/\d{3}")
 DEFAULT_DIRECT_RF_QUESTIONABLE_MILES = 300
 DEFAULT_DIGIPEATED_RF_QUESTIONABLE_MILES = 700
+SSID_HINTS = {
+    1: "possible_digipeater_or_secondary",
+    3: "likely_weather",
+    7: "likely_handheld",
+    9: "likely_mobile",
+    10: "likely_igate_or_internet",
+    11: "possible_balloon_or_aircraft",
+    15: "possible_hf_or_misc",
+}
 STATUS_PREFIXES = (
     "#",
     "ERROR!!!",
@@ -150,6 +160,23 @@ def parse_packet_header(text: str) -> tuple[str, str, str] | None:
     if not CALLSIGN_RE.match(source):
         return None
     return source.upper(), destination.upper(), path.strip()
+
+
+def parse_callsign_ssid(callsign: str | None) -> tuple[str | None, int | None]:
+    if not callsign:
+        return None, None
+    text = callsign.upper()
+    if "-" not in text:
+        return text, None
+    base, suffix = text.rsplit("-", 1)
+    try:
+        return base, int(suffix)
+    except ValueError:
+        return base, None
+
+
+def ssid_hint(ssid: int | None) -> str | None:
+    return SSID_HINTS.get(ssid)
 
 
 def packet_payload(text: str) -> str:
@@ -326,21 +353,37 @@ def parse_repeater_object(payload: str) -> dict[str, Any]:
     return {key: value for key, value in data.items() if value not in (None, "")}
 
 
-def infer_station_type(source: str | None, destination: str | None, payload: str, comment: str, raw_text: str) -> str:
+def infer_station_type(source: str | None, destination: str | None, payload: str, comment: str, raw_text: str, ssid: int | None) -> tuple[str, str]:
     text = f"{payload} {comment} {raw_text}".lower()
     if (destination or "").upper() == "NODES":
-        return "ax25_node"
+        return "ax25_node", "high"
     if (destination or "").upper() == "ID" or "network node" in text:
-        return "packet_node"
+        return "packet_node", "high"
     if payload.startswith(";") and FREQUENCY_RE.search(payload):
-        return "repeater_object"
+        return "repeater_object", "high"
     if "digi igate" in text or "i-gate" in text or "igate" in text:
-        return "igate"
+        return "igate", "high"
     if "digi" in text or "digipeater" in text:
-        return "digipeater"
+        return "digipeater", "high"
     if "small aircraft" in text or (source and AIRCRAFT_SOURCE_RE.match(source)):
-        return "aircraft"
-    return "station"
+        return "aircraft", "high"
+    if "weather" in text or payload.startswith("_"):
+        return "weather", "high"
+    if ssid == 9 and POSITION_MOTION_RE.search(payload):
+        return "mobile", "medium"
+    if ssid == 11:
+        return "aircraft", "low"
+    if ssid == 9:
+        return "mobile", "low"
+    if ssid == 7:
+        return "handheld", "low"
+    if ssid == 3:
+        return "weather", "low"
+    if ssid == 10:
+        return "likely_igate", "low"
+    if ssid == 1:
+        return "possible_digipeater", "low"
+    return "station", "low"
 
 
 def enrich_packet(
@@ -352,6 +395,7 @@ def enrich_packet(
     prefix, text = split_prefix(line)
     parsed_header = parse_packet_header(text)
     callsign, destination, path_raw = parsed_header if parsed_header else (None, None, None)
+    base_callsign, ssid = parse_callsign_ssid(callsign)
     path = parse_path(path_raw)
     used_digi = last_used_digipeater(path)
     was_digipeated = bool(used_digi)
@@ -360,7 +404,7 @@ def enrich_packet(
     payload = packet_payload(text)
     comment = packet_comment(payload)
     lat, lon = parse_position(text)
-    station_type = infer_station_type(callsign, destination, payload, comment, text)
+    station_type, station_type_confidence = infer_station_type(callsign, destination, payload, comment, text, ssid)
     heard_over_rf = bool(prefix and RF_PREFIX_RE.match(prefix))
     category = heard_category(prefix, path_raw, was_direct, was_digipeated)
     preferred_via = None if category == "aprs_is" else preferred_heard_via(path, used_digi, was_direct)
@@ -368,6 +412,9 @@ def enrich_packet(
     metadata: dict[str, Any] = {
         "callsign": callsign,
         "source_callsign": callsign,
+        "base_callsign": base_callsign,
+        "ssid": ssid,
+        "ssid_hint": ssid_hint(ssid),
         "destination": destination,
         "path_raw": path_raw,
         "path": path,
@@ -388,6 +435,7 @@ def enrich_packet(
         "confirmed_gated_by_me": False,
         "rf_channel_prefix": prefix if prefix and RF_PREFIX_RE.match(prefix) else None,
         "station_type": station_type,
+        "station_type_confidence": station_type_confidence,
         "payload": payload,
         "comment": comment,
         "lat": lat,

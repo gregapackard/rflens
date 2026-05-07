@@ -1067,13 +1067,13 @@ def top_count(items: list[str]) -> str | None:
 def gate_status_phrase(metadata: dict[str, Any]) -> str | None:
     gated_by = metadata.get("gated_by")
     if metadata.get("confirmed_gated_by_me") is True:
-        return f"confirmed gated by {gated_by or 'my iGate'}"
+        return f"confirmed gated by {gated_by or 'KF8GBU-10'}"
     if metadata.get("gated_by_other") is True and gated_by:
-        return f"APRS-IS evidence shows it was gated by {gated_by}"
+        return f"seen on APRS-IS via {gated_by}"
     if metadata.get("gate_eligible") is True:
-        return "APRS-IS was connected and verified, so it was eligible to be gated; RF Lens has not confirmed APRS-IS accepted it from KF8GBU-10"
+        return "gate unconfirmed"
     if metadata.get("heard_over_rf") is True:
-        return "heard locally over RF; APRS-IS gate not confirmed"
+        return "gate unconfirmed"
     return None
 
 
@@ -1236,6 +1236,10 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
 
     category = metadata.get("heard_category")
     if category == "aprs_is":
+        if metadata.get("gated_by_other") is True and metadata.get("gated_by"):
+            return f"I saw {callsign} on APRS-IS/network traffic, seen on APRS-IS via {metadata.get('gated_by')}."
+        if metadata.get("confirmed_gated_by_me") is True:
+            return f"I saw {callsign} on APRS-IS/network traffic, confirmed gated by {metadata.get('gated_by') or 'KF8GBU-10'}."
         return f"I saw {callsign} on APRS-IS/network traffic, but it was not heard directly by the antenna."
     if category == "direct_rf":
         parts = [f"I heard {callsign} directly over RF"]

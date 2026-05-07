@@ -15,6 +15,7 @@ DUPLICATE_WINDOW_SECONDS = 60
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
 AUDIO_LEVEL_RE = re.compile(r"audio level\s*=\s*(\d+)\(([^)]*)\)", re.IGNORECASE)
+ESCAPED_BINARY_RE = re.compile(r"<0x[0-9a-f]{2}>", re.IGNORECASE)
 IGATE_SERVER_RE = re.compile(r"Now connected to IGate server\s+(\S+)\s+\([^)]+\)", re.IGNORECASE)
 STATUS_PREFIXES = (
     "#",
@@ -98,6 +99,18 @@ def parse_packet_header(text: str) -> tuple[str, str] | None:
     return source.upper(), destination.upper()
 
 
+def packet_payload(text: str) -> str:
+    if ":" not in text:
+        return ""
+    return text.split(":", 1)[1]
+
+
+def non_aprs_ax25_packet(text: str, destination: str) -> bool:
+    if destination.upper() == "NODES":
+        return True
+    return len(ESCAPED_BINARY_RE.findall(packet_payload(text))) >= 2
+
+
 def packet_like(line: str) -> bool:
     prefix, text = split_prefix(line)
     if ignored_prefix(prefix):
@@ -109,8 +122,10 @@ def packet_like(line: str) -> bool:
     parsed_header = parse_packet_header(text)
     if not parsed_header:
         return False
-    callsign, _destination = parsed_header
-    return callsign not in OWN_CALLSIGNS
+    callsign, destination = parsed_header
+    if callsign in OWN_CALLSIGNS:
+        return False
+    return not non_aprs_ax25_packet(text, destination)
 
 
 def parse_position(text: str) -> tuple[float | None, float | None]:

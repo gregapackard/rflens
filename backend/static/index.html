@@ -3,19 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>RF Lens</title>
+    <title>RFLens</title>
     <link rel="stylesheet" href="/ui/style.css">
   </head>
   <body>
     <header class="topbar">
       <div>
-        <h1>RF Lens</h1>
+        <h1>RFLens</h1>
         <p id="station">Local RF observability</p>
       </div>
       <div class="pulse" id="health">connecting</div>
     </header>
 
-    <nav class="tabs" aria-label="RF Lens views">
+    <nav class="tabs" aria-label="RFLens views">
       <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
       <button class="tab" type="button" data-tab="overview">RF Overview</button>
       <button class="tab" type="button" data-tab="adsb">ADS-B</button>
@@ -29,7 +29,7 @@
           <section class="overview-card">
             <h3>Global Status</h3>
             <dl>
-              <div><dt>RF Lens</dt><dd id="dash-global-health">connecting</dd></div>
+              <div><dt>RFLens</dt><dd id="dash-global-health">connecting</dd></div>
               <div><dt>Station</dt><dd id="dash-global-station">-</dd></div>
               <div><dt>Active sources</dt><dd id="dash-global-sources">-</dd></div>
               <div><dt>Last refresh</dt><dd id="dash-global-refresh">-</dd></div>
@@ -61,7 +61,11 @@
               <div><dt>Session RF packets</dt><dd id="dash-aprs-packets">No data yet</dd></div>
               <div><dt>With position</dt><dd id="dash-aprs-positioned">No data yet</dd></div>
               <div><dt>Direct / digipeated</dt><dd id="dash-aprs-direct-digi">No data yet</dd></div>
+              <div><dt>Network-side</dt><dd id="dash-aprs-network">No data yet</dd></div>
               <div><dt>Top digipeater</dt><dd id="dash-aprs-top-digi">No data yet</dd></div>
+              <div><dt>Gate eligible</dt><dd id="dash-aprs-gate-eligible">No data yet</dd></div>
+              <div><dt>Confirmed gated</dt><dd id="dash-aprs-gate-confirmed">No data yet</dd></div>
+              <div><dt>Local gate unconfirmed</dt><dd id="dash-aprs-gate-unconfirmed">No data yet</dd></div>
               <div><dt>Last 10 min</dt><dd id="dash-aprs-recent">No data yet</dd></div>
               <div><dt>Last audio</dt><dd id="dash-aprs-audio">No data yet</dd></div>
               <div><dt>Best audio</dt><dd id="dash-aprs-best-audio">No data yet</dd></div>
@@ -179,10 +183,10 @@
             <h2>RF Overview</h2>
             <span id="overview-updated">waiting</span>
           </div>
-          <section class="insights-panel" aria-label="RF Lens Insights">
+          <section class="insights-panel" aria-label="RFLens Insights">
             <div class="insights-head">
               <div>
-                <h2>RF Lens Insights</h2>
+                <h2>RFLens Insights</h2>
                 <p>Plain-English observations from the packets and aircraft your node heard.</p>
               </div>
               <div class="insights-actions">
@@ -205,11 +209,14 @@
                   <div><dt>Farthest direct</dt><dd id="insights-daily-farthest-direct">No data yet</dd></div>
                   <div><dt>Farthest digipeated</dt><dd id="insights-daily-farthest-digipeated">No data yet</dd></div>
                   <div><dt>Farthest any RF</dt><dd id="insights-daily-farthest-any-rf">No data yet</dd></div>
+                  <div><dt>Farthest network-side</dt><dd id="insights-daily-farthest-network">No data yet</dd></div>
                   <div><dt>Best APRS audio</dt><dd id="insights-daily-aprs-audio">No data yet</dd></div>
                   <div><dt>Common digipeater</dt><dd id="insights-daily-aprs-digi">No data yet</dd></div>
                   <div><dt>Gate eligible</dt><dd id="insights-daily-gate-eligible">No data yet</dd></div>
                   <div><dt>Gate confirmed</dt><dd id="insights-daily-gate-confirmed">No data yet</dd></div>
-                  <div><dt>Confirmed gated by KF8GBU-10</dt><dd id="insights-daily-gate-me">No data yet</dd></div>
+                  <div><dt>Confirmed gated by local station</dt><dd id="insights-daily-gate-me">No data yet</dd></div>
+                  <div><dt>Local gate unconfirmed</dt><dd id="insights-daily-gate-unconfirmed">No data yet</dd></div>
+                  <div><dt>Gate notice</dt><dd id="insights-daily-gate-notice">No data yet</dd></div>
                   <div><dt>Gate competition</dt><dd id="insights-daily-gate-competition">No data yet</dd></div>
                   <div><dt>ADS-B range today</dt><dd id="insights-daily-adsb-range">No data yet</dd></div>
                   <div><dt>ADS-B highest today</dt><dd id="insights-daily-adsb-altitude">No data yet</dd></div>
@@ -257,7 +264,11 @@
                 <div><dt>Session RF packets</dt><dd id="overview-aprs-packets">No data yet</dd></div>
                 <div><dt>With position</dt><dd id="overview-aprs-positioned">No data yet</dd></div>
                 <div><dt>Direct / digipeated</dt><dd id="overview-aprs-direct-digi">No data yet</dd></div>
+                <div><dt>Network-side</dt><dd id="overview-aprs-network">No data yet</dd></div>
                 <div><dt>Top digipeater</dt><dd id="overview-aprs-top-digi">No data yet</dd></div>
+                <div><dt>Gate eligible</dt><dd id="overview-aprs-gate-eligible">No data yet</dd></div>
+                <div><dt>Confirmed gated</dt><dd id="overview-aprs-gate-confirmed">No data yet</dd></div>
+                <div><dt>Local gate unconfirmed</dt><dd id="overview-aprs-gate-unconfirmed">No data yet</dd></div>
                 <div><dt>Last 10 min</dt><dd id="overview-aprs-recent">No data yet</dd></div>
                 <div><dt>Last audio</dt><dd id="overview-aprs-audio">No data yet</dd></div>
                 <div><dt>Best audio</dt><dd id="overview-aprs-best-audio">No data yet</dd></div>

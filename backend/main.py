@@ -13,7 +13,7 @@ from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_i
 from .models import EventIn
 
 
-app = FastAPI(title="RF Lens")
+app = FastAPI(title="RFLens")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 

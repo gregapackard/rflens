@@ -1135,9 +1135,9 @@ def gate_status_phrase(metadata: dict[str, Any]) -> str | None:
     if metadata.get("gated_by_other") is True and gated_by:
         return f"seen on APRS-IS via {gated_by}"
     if metadata.get("gate_eligible") is True:
-        return "gate unconfirmed"
+        return "local gate unconfirmed"
     if metadata.get("heard_over_rf") is True:
-        return "gate unconfirmed"
+        return "local gate unconfirmed"
     return None
 
 
@@ -1286,6 +1286,35 @@ def format_aprs_range(item: tuple[dict[str, Any] | None, dict[str, Any], float |
     return text
 
 
+def aprs_range_sentence(
+    item: tuple[dict[str, Any] | None, dict[str, Any], float | None],
+    label: str,
+    *,
+    include_via: bool = False,
+    network_side: bool = False,
+) -> str | None:
+    event, metadata, miles = item
+    if not event or miles is None:
+        return None
+    callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
+    via = metadata.get("preferred_heard_via")
+    if network_side:
+        return f"{label}: {callsign} was seen {miles:.0f} miles away, but this was APRS-IS/network-side, not direct RF."
+    via_text = f" via {via}" if include_via and via and via != "direct" else ""
+    return f"{label}: {callsign} heard{via_text} {miles:.0f} miles away."
+
+
+def aprs_audio_sentence(item: tuple[dict[str, Any] | None, dict[str, Any], float | None]) -> str | None:
+    event, metadata, level = item
+    if not event or level is None:
+        return None
+    audio = format_audio(level, metadata.get("audio_quality"))
+    if not audio:
+        return None
+    callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
+    return f"Best APRS audio: {callsign} decoded at audio {audio}."
+
+
 def aprs_event_sentence(event: dict[str, Any]) -> str:
     metadata = enriched_metadata(parse_metadata_payload(event.get("metadata_json")))
     callsign = event.get("callsign") or metadata.get("source_callsign") or "an APRS station"
@@ -1339,6 +1368,7 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
 def fetch_insights() -> dict[str, Any]:
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     aprs_status = fetch_aprs_status()
+    local_callsign = str(aprs_status.get("callsign") or "KF8GBU-10")
     records = record_by_type(fetch_records())
     aprs_recent = fetch_all(
         """
@@ -1433,22 +1463,31 @@ def fetch_insights() -> dict[str, Any]:
             if event.get("callsign") and metadata.get("heard_category") in {"direct_rf", "digipeated_rf"}
         })
         summary.append(f"You heard {unique_recent} APRS stations recently over RF.")
-    if farthest_direct[0]:
-        summary.append(f"Farthest direct RF heard: {format_aprs_range(farthest_direct)}.")
-    if farthest_digipeated[0]:
-        summary.append(f"Farthest digipeated RF heard: {format_aprs_range(farthest_digipeated, include_via=True)}.")
-    if farthest_network[0] and farthest_network[2] and farthest_network[2] > max(farthest_rf[2] or 0, 0):
-        summary.append(f"A long-distance APRS position was seen at approximately {farthest_network[2]:.0f} miles, but it was APRS-IS/network-side, not direct RF.")
+    direct_sentence = aprs_range_sentence(farthest_direct, "Direct RF")
+    digipeated_sentence = aprs_range_sentence(farthest_digipeated, "Digipeated RF", include_via=True)
+    network_sentence = aprs_range_sentence(farthest_network, "Network-side APRS", network_side=True)
+    audio_sentence = aprs_audio_sentence(best_audio)
+    gate_notice = (
+        f"You are hearing RF packets, but RFLens has not confirmed a packet accepted by APRS-IS as gated by {local_callsign}."
+        if gate_stats["gate_eligible"] and gate_stats["gate_confirmed"] == 0
+        else None
+    )
+    if direct_sentence:
+        summary.append(direct_sentence)
+    if digipeated_sentence:
+        summary.append(digipeated_sentence)
+    if network_sentence and farthest_network[2] and farthest_network[2] > max(farthest_rf[2] or 0, 0):
+        summary.append(network_sentence)
     if latest_aprs:
         via = preferred_heard_via(latest_metadata)
         via_text = f" via {via}" if via and via != "direct" else " directly" if via == "direct" else ""
         summary.append(f"Most recent RF APRS packet was {latest_aprs.get('callsign')}{via_text}.")
-    if gate_stats["heard_over_rf"] and gate_stats["gate_confirmed"] == 0 and aprs_status.get("aprs_is_connected") and aprs_status.get("aprs_is_verified"):
-        summary.append("You are hearing RF packets, but RF Lens has not yet confirmed a packet accepted by APRS-IS as gated by KF8GBU-10.")
-    if best_audio[0] and best_audio[2] is not None:
-        summary.append(f"Best APRS audio recently was {format_audio(best_audio[2], best_audio[1].get('audio_quality'))}.")
+    if gate_notice:
+        summary.append(gate_notice)
+    if audio_sentence:
+        summary.append(audio_sentence)
     if not summary:
-        summary.append("RF Lens is waiting for fresh APRS or ADS-B observations to summarize.")
+        summary.append("RFLens is waiting for fresh APRS or ADS-B observations to summarize.")
 
     aprs_plain = [aprs_event_sentence(event) for event in prioritized_aprs_events(aprs_with_metadata)]
     adsb_plain: list[str] = []
@@ -1486,6 +1525,7 @@ def fetch_insights() -> dict[str, Any]:
             "farthest_digipeated_rf_today": format_aprs_range(farthest_digipeated_today, include_via=True),
             "farthest_any_rf_today": format_aprs_range(farthest_rf_today, include_via=True),
             "farthest_network_seen_today": format_aprs_range(farthest_network_today),
+            "farthest_network_seen_today_note": aprs_range_sentence(farthest_network_today, "Network-side APRS", network_side=True),
             "best_aprs_audio_today": (
                 format_audio(best_audio_today[2], best_audio_today[1].get("audio_quality"))
                 if best_audio_today[0] and best_audio_today[2] is not None
@@ -1495,6 +1535,12 @@ def fetch_insights() -> dict[str, Any]:
             "gate_eligible_today": gate_stats_today["gate_eligible"],
             "gate_confirmed_today": gate_stats_today["gate_confirmed"],
             "confirmed_gated_by_kf8gbu_10_today": gate_stats_today["confirmed_gated_by_kf8gbu_10"],
+            "gate_unconfirmed_today": max(gate_stats_today["gate_eligible"] - gate_stats_today["gate_confirmed"], 0),
+            "gate_notice_today": (
+                f"RF heard and gate eligible, but no APRS-IS path proof confirms {local_callsign} gated a packet today."
+                if gate_stats_today["gate_eligible"] and gate_stats_today["gate_confirmed"] == 0
+                else None
+            ),
             "gate_competition_note_today": gate_stats_today["language"] if gate_stats_today["likely_competing_igates_or_digipeaters"] else None,
             "adsb_max_range_today": format_distance_nmi(adsb_range_today),
             "adsb_highest_altitude_today": format_feet(adsb_altitude_today),
@@ -1510,6 +1556,7 @@ def fetch_insights() -> dict[str, Any]:
                 "farthest_digipeated_rf": format_aprs_range(farthest_digipeated, include_via=True),
                 "farthest_any_rf": format_aprs_range(farthest_rf, include_via=True),
                 "farthest_network_seen": format_aprs_range(farthest_network),
+                "farthest_network_seen_note": network_sentence,
                 "best_audio": (
                     f"{best_audio[0].get('callsign')} with audio {format_audio(best_audio[2], best_audio[1].get('audio_quality'))}"
                     if best_audio[0] and best_audio[2] is not None
@@ -1528,7 +1575,12 @@ def fetch_insights() -> dict[str, Any]:
                 ),
                 "top_digipeater": top_digi,
             },
-            "gate": gate_stats,
+            "gate": {
+                **gate_stats,
+                "gate_unconfirmed": max(gate_stats["gate_eligible"] - gate_stats["gate_confirmed"], 0),
+                "notice": gate_notice,
+                "local_callsign": local_callsign,
+            },
             "categories": category_stats,
         },
         "adsb": {

@@ -104,14 +104,26 @@ def parse_audio_line(text: str) -> dict[str, Any] | None:
     }
 
 
-def parse_igate_status(text: str) -> dict[str, Any]:
+def configured_aprs_callsign(config: dict[str, Any] | None = None) -> str:
+    cfg = config or load_config()
+    station_cfg = cfg.get("station", {}) or {}
+    aprs_cfg = source_config("aprs", cfg)
+    return str(
+        aprs_cfg.get("callsign")
+        or station_cfg.get("aprs_callsign")
+        or station_cfg.get("callsign")
+        or APRS_CALLSIGN
+    ).upper()
+
+
+def parse_igate_status(text: str, local_callsign: str = APRS_CALLSIGN) -> dict[str, Any]:
     lowered = text.lower()
     fields: dict[str, Any] = {
         "online": True,
         "aprs_is_connected": True,
         "last_igate_status_at": utc_now(),
     }
-    if f"logresp {APRS_CALLSIGN.lower()} verified" in lowered:
+    if f"logresp {local_callsign.lower()} verified" in lowered:
         fields["aprs_is_verified"] = True
     server_match = IGATE_SERVER_RE.search(text)
     if server_match:
@@ -119,7 +131,7 @@ def parse_igate_status(text: str) -> dict[str, Any]:
     return fields
 
 
-def parse_gate_confirmation(prefix: str | None, text: str) -> dict[str, Any] | None:
+def parse_gate_confirmation(prefix: str | None, text: str, local_callsign: str = APRS_CALLSIGN) -> dict[str, Any] | None:
     parsed_header = parse_packet_header(text)
     if not parsed_header:
         return None
@@ -130,13 +142,7 @@ def parse_gate_confirmation(prefix: str | None, text: str) -> dict[str, Any] | N
         return {
             "callsign": callsign,
             "gated_by": gated_by,
-            "confirmed_gated_by_me": gated_by == APRS_CALLSIGN,
-        }
-    if prefix and prefix.lower() == "ig>tx":
-        return {
-            "callsign": callsign,
-            "gated_by": APRS_CALLSIGN,
-            "confirmed_gated_by_me": True,
+            "confirmed_gated_by_me": str(gated_by).strip().upper() == str(local_callsign).strip().upper(),
         }
     return None
 
@@ -486,8 +492,8 @@ def duplicate_packet(packet_line: str, seen_packets: dict[str, float], now: floa
     return False
 
 
-def update_ignored_igate(count: int, text: str) -> None:
-    fields = parse_igate_status(text)
+def update_ignored_igate(count: int, text: str, local_callsign: str = APRS_CALLSIGN) -> None:
+    fields = parse_igate_status(text, local_callsign)
     fields["ignored_igate_lines"] = count
     update_aprs_status(**fields)
 
@@ -545,6 +551,8 @@ def run_forever() -> None:
     full_cfg = load_config()
     cfg = source_config("aprs", full_cfg)
     station_cfg = full_cfg.get("station", {}) or {}
+    local_callsign = configured_aprs_callsign(full_cfg)
+    OWN_CALLSIGNS.add(local_callsign)
     source_id = get_or_create_source(
         cfg.get("name", "APRS Direwolf"),
         "aprs",
@@ -561,8 +569,8 @@ def run_forever() -> None:
     last_audio: dict[str, Any] | None = None
     aprs_is_connected = False
     aprs_is_verified = False
-    reset_aprs_status(APRS_CALLSIGN)
-    hydrate_aprs_status_from_recent_events(APRS_CALLSIGN)
+    reset_aprs_status(local_callsign)
+    hydrate_aprs_status_from_recent_events(local_callsign)
 
     for line in follow(path):
         if not line:
@@ -571,10 +579,10 @@ def run_forever() -> None:
         prefix, text = split_prefix(line)
         if ignored_prefix(prefix):
             ignored_igate_lines += 1
-            confirmation = parse_gate_confirmation(prefix, text)
+            confirmation = parse_gate_confirmation(prefix, text, local_callsign)
             if confirmation:
                 update_recent_aprs_gate_confirmation(raw_text=text, **confirmation)
-            fields = parse_igate_status(text)
+            fields = parse_igate_status(text, local_callsign)
             aprs_is_connected = bool(fields.get("aprs_is_connected", aprs_is_connected))
             aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
             fields["ignored_igate_lines"] = ignored_igate_lines
@@ -595,7 +603,7 @@ def run_forever() -> None:
         if status_or_help_line(text):
             ignored_status_lines += 1
             if aprs_is_status_line(text):
-                fields = parse_igate_status(text)
+                fields = parse_igate_status(text, local_callsign)
                 aprs_is_connected = bool(fields.get("aprs_is_connected", aprs_is_connected))
                 aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
                 fields["ignored_status_lines"] = ignored_status_lines

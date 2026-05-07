@@ -287,9 +287,9 @@ function aprsAudioLabel(metadata) {
 }
 
 function aprsGateLabel(metadata) {
-  if (metadata.confirmed_gated_by_me === true) return `gated by ${metadata.gated_by || "me"}`;
+  if (metadata.confirmed_gated_by_me === true) return `confirmed gated by ${metadata.gated_by || "local station"}`;
   if (metadata.gated_by_other === true && metadata.gated_by) return `gated by ${metadata.gated_by}`;
-  if (metadata.gate_eligible === true) return "gate eligible";
+  if (metadata.gate_eligible === true) return "gate eligible, unconfirmed";
   if (metadata.heard_over_rf === true) return "RF only";
   return "";
 }
@@ -298,7 +298,7 @@ function aprsCategoryLabel(metadata) {
   const category = String(metadata.heard_category || "").toLowerCase();
   if (category === "direct_rf" || (metadata.direct_rf_heard === true)) return "Direct RF";
   if (category === "digipeated_rf" || (metadata.digipeated_rf_heard === true)) return "Digipeated RF";
-  if (category === "aprs_is" || (metadata.network_seen === true)) return "APRS-IS";
+  if (category === "aprs_is" || (metadata.network_seen === true)) return "APRS-IS/network-side";
   return "";
 }
 
@@ -380,7 +380,9 @@ function eventLine(event) {
   }
   if (event.event_type === "aprs_packet") {
     const metadata = parseMetadata(event);
-    const parts = [`APRS heard ${event.callsign || metadata.source_callsign || "station"}`];
+    const category = aprsCategoryLabel(metadata);
+    const prefix = category ? `${category}:` : "APRS heard";
+    const parts = [`${prefix} ${event.callsign || metadata.source_callsign || "station"}`];
     const distance = aprsDistanceLabel(metadata);
     const via = aprsViaLabel(metadata);
     if (distance) parts.push(distance);
@@ -576,6 +578,8 @@ function insightHighlightLines(insights = {}) {
   return [
     daily.farthest_direct_rf_today ? `APRS farthest direct RF today: ${daily.farthest_direct_rf_today}.` : "",
     daily.farthest_digipeated_rf_today ? `APRS farthest digipeated RF today: ${daily.farthest_digipeated_rf_today}.` : "",
+    daily.farthest_network_seen_today_note || "",
+    daily.gate_notice_today || insights.aprs?.gate?.notice || "",
     daily.best_aprs_audio_today ? `Best APRS audio today: ${daily.best_aprs_audio_today}.` : "",
     insights.aprs?.notable?.latest_rf ? `Newest RF packet: ${insights.aprs.notable.latest_rf}.` : "",
     daily.adsb_max_range_today ? `ADS-B max range today: ${daily.adsb_max_range_today}.` : "",
@@ -609,7 +613,7 @@ function renderOverviewFeed(events, sources, targetId, limit = 20, insights = {}
     `).join("") : `
       <div class="feed-row">
         <time>waiting</time>
-        <strong>RF Lens is listening</strong>
+        <strong>RFLens is listening</strong>
         <span>insight</span>
         <p>No notable APRS or ADS-B observations are available yet</p>
       </div>
@@ -657,7 +661,7 @@ function fallbackText(value) {
 
 function renderInsights(insights = {}) {
   const summary = Array.isArray(insights.summary) ? insights.summary : [];
-  setHtml("insights-summary", (summary.length ? summary : ["RF Lens is waiting for fresh RF observations."]).slice(0, 6).map((line) => `
+  setHtml("insights-summary", (summary.length ? summary : ["RFLens is waiting for fresh RF observations."]).slice(0, 6).map((line) => `
     <article class="insight-card">
       <p>${esc(line)}</p>
     </article>
@@ -672,11 +676,14 @@ function renderInsights(insights = {}) {
   setText("insights-daily-farthest-direct", fallbackText(daily.farthest_direct_rf_today));
   setText("insights-daily-farthest-digipeated", fallbackText(daily.farthest_digipeated_rf_today));
   setText("insights-daily-farthest-any-rf", fallbackText(daily.farthest_any_rf_today));
+  setText("insights-daily-farthest-network", fallbackText(daily.farthest_network_seen_today));
   setText("insights-daily-aprs-audio", fallbackText(daily.best_aprs_audio_today));
   setText("insights-daily-aprs-digi", fallbackText(daily.most_common_digipeater_path_today));
   setText("insights-daily-gate-eligible", fallbackText(daily.gate_eligible_today));
   setText("insights-daily-gate-confirmed", fallbackText(daily.gate_confirmed_today));
   setText("insights-daily-gate-me", fallbackText(daily.confirmed_gated_by_kf8gbu_10_today));
+  setText("insights-daily-gate-unconfirmed", fallbackText(daily.gate_unconfirmed_today));
+  setText("insights-daily-gate-notice", fallbackText(daily.gate_notice_today || insights.aprs?.gate?.notice));
   setText("insights-daily-gate-competition", fallbackText(daily.gate_competition_note_today));
   setText("insights-daily-adsb-range", fallbackText(daily.adsb_max_range_today));
   setText("insights-daily-adsb-altitude", fallbackText(daily.adsb_highest_altitude_today));
@@ -796,11 +803,16 @@ function renderAprsCard(aprs, aprsStatus = {}) {
   const newest = aprs.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp))[0];
   const enriched = aprs.map((event) => ({ event, metadata: aprsMetadata(event) }));
   const farthest = enriched
-    .map((item) => ({ event: item.event, miles: Number(item.metadata.distance_miles) }))
+    .filter((item) => ["direct_rf", "digipeated_rf"].includes(String(item.metadata.heard_category || "").toLowerCase()))
+    .map((item) => ({ event: item.event, metadata: item.metadata, miles: Number(item.metadata.distance_miles) }))
     .filter((item) => Number.isFinite(item.miles))
     .sort((a, b) => b.miles - a.miles)[0];
-  const directCount = enriched.filter((item) => item.metadata.was_direct === true || item.metadata.heard_via === "direct").length;
-  const digipeatedCount = enriched.filter((item) => item.metadata.was_digipeated === true || (item.metadata.heard_via && item.metadata.heard_via !== "direct")).length;
+  const directCount = enriched.filter((item) => String(item.metadata.heard_category || "").toLowerCase() === "direct_rf").length;
+  const digipeatedCount = enriched.filter((item) => String(item.metadata.heard_category || "").toLowerCase() === "digipeated_rf").length;
+  const networkCount = enriched.filter((item) => String(item.metadata.heard_category || "").toLowerCase() === "aprs_is").length;
+  const gateEligible = enriched.filter((item) => item.metadata.gate_eligible === true).length;
+  const gateConfirmed = enriched.filter((item) => item.metadata.confirmed_gated_by_me === true).length;
+  const gateUnconfirmed = Math.max(gateEligible - gateConfirmed, 0);
   const topDigi = summarizeCounts(countBy(enriched.filter((item) => {
     const via = preferredHeardVia(item.metadata);
     return via && via !== "direct";
@@ -822,7 +834,11 @@ function renderAprsCard(aprs, aprsStatus = {}) {
   setMany(["dash-aprs-packets", "overview-aprs-packets"], Number.isFinite(heardTotal) ? heardTotal : (aprs.length ? aprs.length : "No data yet"));
   setMany(["dash-aprs-positioned", "overview-aprs-positioned"], aprs.length ? positioned.length : "No data yet");
   setMany(["dash-aprs-farthest", "overview-aprs-farthest"], farthest ? `${farthest.event.callsign || "station"}, ${farthest.miles.toFixed(0)} mi` : "No data yet");
-  setMany(["dash-aprs-direct-digi", "overview-aprs-direct-digi"], aprs.length ? `${directCount} / ${digipeatedCount}` : "No data yet");
+  setMany(["dash-aprs-direct-digi", "overview-aprs-direct-digi"], aprs.length ? `${directCount} direct / ${digipeatedCount} digipeated` : "No data yet");
+  setMany(["dash-aprs-network", "overview-aprs-network"], aprs.length ? networkCount : "No data yet");
+  setMany(["dash-aprs-gate-eligible", "overview-aprs-gate-eligible"], aprs.length ? gateEligible : "No data yet");
+  setMany(["dash-aprs-gate-confirmed", "overview-aprs-gate-confirmed"], aprs.length ? gateConfirmed : "No data yet");
+  setMany(["dash-aprs-gate-unconfirmed", "overview-aprs-gate-unconfirmed"], aprs.length ? gateUnconfirmed : "No data yet");
   setMany(["dash-aprs-top-digi", "overview-aprs-top-digi"], topDigi);
   setMany(["dash-aprs-recent", "overview-aprs-recent"], aprs.length ? `${recent.length} packets` : "No data yet");
   setMany(["dash-aprs-audio", "overview-aprs-audio"], audioText(lastAudio, audioQuality));

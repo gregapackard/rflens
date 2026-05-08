@@ -13,6 +13,7 @@ const state = {
   latestAprs: [],
   aprsStatus: {},
   insights: {},
+  profileSummary: "",
   allTimeRecords: [],
   records: {
     initialized: false,
@@ -189,6 +190,22 @@ function todayKey() {
 
 function formatNumber(value, fallback = "No data yet") {
   return Number.isFinite(Number(value)) ? String(value) : fallback;
+}
+
+function formatInteger(value, fallback = "No data yet") {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString() : fallback;
+}
+
+function formatCoord(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(4) : null;
+}
+
+function yesNo(value, fallback = "No data yet") {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return fallback;
 }
 
 function formatPercent(value) {
@@ -441,6 +458,10 @@ function summarizeCounts(counts, limit = 3) {
   return entries.length ? entries.map(([key, count]) => `${key}: ${count}`).join(", ") : "No data yet";
 }
 
+function topEntries(counts, limit = 5) {
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, limit);
+}
+
 function sourceTypeForEvent(event, sources) {
   const byId = new Map(sources.map((source) => [String(source.id), source.type]));
   if (byId.has(event.source_id)) return byId.get(event.source_id);
@@ -666,6 +687,8 @@ function renderAprsTable(events) {
     </tr>
   `).join("");
   setHtml("aprs-table", html);
+  setHtml("aprs-tab-table", html || `<tr><td colspan="3">No APRS packets yet</td></tr>`);
+  setText("aprs-tab-count", events.length);
   setHtml("events-aprs-table", state.eventFilters.aprs ? html : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
 }
 
@@ -707,6 +730,94 @@ function renderInsights(insights = {}) {
   const adsbLines = insights.adsb?.plain_english || [];
   setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 8).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No APRS insights yet.</p>");
   setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 5).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No ADS-B insights yet.</p>");
+}
+
+function renderDonut(targetId, values) {
+  const total = values.reduce((sum, item) => sum + item.value, 0);
+  if (!total) {
+    setHtml(targetId, "No data yet");
+    return;
+  }
+  let cursor = 0;
+  const colors = ["var(--green)", "var(--cyan)", "var(--amber)"];
+  const stops = values.map((item, index) => {
+    const start = cursor;
+    cursor += (item.value / total) * 100;
+    return `${colors[index % colors.length]} ${start}% ${cursor}%`;
+  }).join(", ");
+  setHtml(targetId, `
+    <div class="donut" style="background: conic-gradient(${stops});">
+      <span>${esc(total.toLocaleString())}</span>
+    </div>
+    <div class="chart-legend">
+      ${values.map((item, index) => `
+        <div><i style="background:${colors[index % colors.length]}"></i><span>${esc(item.label)}</span><strong>${esc(item.value.toLocaleString())}</strong></div>
+      `).join("")}
+    </div>
+  `);
+}
+
+function renderHourBars(targetId, events) {
+  const today = new Date().toDateString();
+  const buckets = Array.from({ length: 24 }, () => 0);
+  events.forEach((event) => {
+    const date = new Date(event.timestamp);
+    if (Number.isNaN(date.getTime()) || date.toDateString() !== today) return;
+    buckets[date.getHours()] += 1;
+  });
+  const max = Math.max(...buckets);
+  if (!max) {
+    setHtml(targetId, "No APRS activity in the current fetched sample yet.");
+    return;
+  }
+  setHtml(targetId, buckets.map((count, hour) => `
+    <div class="hour-bar" title="${hour}:00 ${count} packet${count === 1 ? "" : "s"}">
+      <span style="height:${Math.max(8, (count / max) * 100)}%"></span>
+      <small>${hour % 6 === 0 ? hour : ""}</small>
+    </div>
+  `).join(""));
+}
+
+function renderRankBars(targetId, entries) {
+  if (!entries.length) {
+    setHtml(targetId, "No data yet");
+    return;
+  }
+  const max = Math.max(...entries.map((entry) => entry[1]));
+  setHtml(targetId, entries.map(([label, count]) => `
+    <div class="rank-row">
+      <span>${esc(label)}</span>
+      <div><i style="width:${Math.max(6, (count / max) * 100)}%"></i></div>
+      <strong>${esc(count.toLocaleString())}</strong>
+    </div>
+  `).join(""));
+}
+
+function renderVisuals({ aprs, adsb, sources, insights, system }) {
+  const daily = insights?.daily || {};
+  renderDonut("visual-aprs-categories", [
+    { label: "Direct RF", value: Number(daily.direct_rf_heard_today) || 0 },
+    { label: "Digipeated RF", value: Number(daily.digipeated_rf_heard_today) || 0 },
+    { label: "APRS-IS/network-side", value: Number(daily.network_seen_today) || 0 },
+  ]);
+  renderHourBars("visual-aprs-hourly", aprs);
+  const digiCounts = {};
+  aprs.map(aprsMetadata).forEach((metadata) => {
+    const via = preferredHeardVia(metadata);
+    if (via && via !== "direct") digiCounts[via] = (digiCounts[via] || 0) + 1;
+  });
+  renderRankBars("visual-aprs-digis", topEntries(digiCounts, 5));
+  renderRankBars("visual-station-types", topEntries(countBy(aprs.map(aprsMetadata), (metadata) => (
+    metadata.station_type ? stationTypeLabel(metadata.station_type) : "Station"
+  )), 5));
+  const aircraft = uniqueAircraftEvents(adsb);
+  setHtml("visual-adsb-summary", [
+    ["Aircraft sample", aircraft.length ? aircraft.length.toLocaleString() : "No data yet"],
+    ["Max range today", fallbackText(daily.adsb_max_range_today)],
+    ["Highest today", fallbackText(daily.adsb_highest_altitude_today)],
+    ["Strongest signal", fallbackText(daily.adsb_strongest_signal_today)],
+  ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join(""));
+  setHtml("visual-services", sources.length ? sources.map(profileServiceHtml).join("") : serviceHealthSummary(sources, system));
 }
 
 function renderAdsbTable(events) {
@@ -911,6 +1022,90 @@ function renderSystemCard(system, sources) {
   setMany(["dash-system-warnings", "overview-system-warnings"], warnings.length);
 }
 
+function stationLocationLabel(station) {
+  const lat = formatCoord(station?.lat);
+  const lon = formatCoord(station?.lon);
+  return lat && lon ? `${lat}, ${lon}` : "No data yet";
+}
+
+function profileServiceHtml(source) {
+  const status = sourceStatus(source);
+  const online = status === "online";
+  const seen = source?.last_seen ? relTime(source.last_seen) : "No recent heartbeat";
+  const name = source?.name || titleCase(source?.type || "service");
+  return `
+    <div class="profile-service ${online ? "online" : "offline"}">
+      <strong>${esc(name)}</strong>
+      <span>${esc(status)} - ${esc(seen)}</span>
+    </div>
+  `;
+}
+
+function serviceHealthSummary(sources, system) {
+  const liveSources = sources.filter((source) => sourceStatus(source) === "online").length;
+  const parts = [];
+  if (sources.length) parts.push(`${liveSources}/${sources.length} sources online`);
+  const cpu = formatPercent(system?.cpu_percent);
+  if (cpu !== "No data yet") parts.push(`CPU ${cpu}`);
+  const memory = formatPercent(system?.memory?.percent);
+  if (memory !== "No data yet") parts.push(`memory ${memory}`);
+  const disk = formatPercent(system?.disk?.percent);
+  if (disk !== "No data yet") parts.push(`disk ${disk}`);
+  return parts.join(", ") || "No service health data yet";
+}
+
+function buildProfileSummary({ station, aprsStatus, insights, sources, system }) {
+  const daily = insights?.daily || {};
+  const lines = [
+    `RFLens Node: ${station?.name || "RF Node"}`,
+    `Grid: ${station?.grid || "unknown"}`,
+  ];
+  const callsign = aprsStatus?.callsign;
+  if (callsign) lines.push(`Callsign: ${callsign}`);
+  lines.push(`APRS heard today: ${fallbackText(daily.aprs_packets_heard_today)} packets`);
+  lines.push(`Farthest direct APRS: ${fallbackText(daily.farthest_direct_rf_today)}`);
+  lines.push(`Farthest digipeated APRS: ${fallbackText(daily.farthest_digipeated_rf_today)}`);
+  lines.push(`ADS-B max range: ${fallbackText(daily.adsb_max_range_today)}`);
+  lines.push(`Station services: ${serviceHealthSummary(sources, system)}`);
+  return lines.join("\n");
+}
+
+function renderStationProfile({ station, sources, aprsStatus, insights, system }) {
+  const daily = insights?.daily || {};
+  const stationName = station?.name || "RF Node";
+  const callsign = aprsStatus?.callsign || "No data yet";
+  const confirmedGated = Number(daily.confirmed_gated_by_kf8gbu_10_today ?? daily.gate_confirmed_today);
+  const gateEligible = Number(daily.gate_eligible_today);
+  const gateNote = Number.isFinite(confirmedGated) && confirmedGated > 0
+    ? `${confirmedGated.toLocaleString()} packet${confirmedGated === 1 ? "" : "s"} confirmed by APRS-IS path proof today.`
+    : "No APRS-IS proof yet that this station gated a packet today.";
+
+  setText("profile-station-name", stationName);
+  setText("profile-station-subtitle", `${station?.grid || "Local RF node"} - See what your station hears.`);
+  setText("profile-local-first", "Local-first");
+  setText("profile-callsign", callsign);
+  setText("profile-grid", station?.grid || "No data yet");
+  setText("profile-location", stationLocationLabel(station));
+  setText("profile-aprs-is-connected", yesNo(aprsStatus?.aprs_is_connected));
+  setText("profile-aprs-is-verified", yesNo(aprsStatus?.aprs_is_verified));
+  setText("profile-last-aprs", aprsStatus?.last_rf_packet_at ? `${aprsStatus.last_rf_callsign || "APRS"}, ${relTime(aprsStatus.last_rf_packet_at)}` : "No data yet");
+  setText("profile-aprs-packets-total", formatInteger(aprsStatus?.rf_packets_heard_total));
+  setText("profile-aprs-unique", formatInteger(aprsStatus?.unique_callsigns_seen));
+  setText("profile-aprs-packets-today", formatInteger(daily.aprs_packets_heard_today));
+  setText("profile-direct-rf-today", formatInteger(daily.direct_rf_heard_today));
+  setText("profile-digipeated-rf-today", formatInteger(daily.digipeated_rf_heard_today));
+  setText("profile-farthest-direct", fallbackText(daily.farthest_direct_rf_today));
+  setText("profile-farthest-digipeated", fallbackText(daily.farthest_digipeated_rf_today));
+  setText("profile-gate-eligible", Number.isFinite(gateEligible) ? gateEligible.toLocaleString() : "No data yet");
+  setText("profile-gate-confirmed", Number.isFinite(confirmedGated) ? confirmedGated.toLocaleString() : "No data yet");
+  setText("profile-gate-note", gateNote);
+  setText("profile-adsb-range", fallbackText(daily.adsb_max_range_today));
+  setText("profile-adsb-altitude", fallbackText(daily.adsb_highest_altitude_today));
+  setText("profile-adsb-signal", fallbackText(daily.adsb_strongest_signal_today));
+  setHtml("profile-services", sources.length ? sources.map(profileServiceHtml).join("") : "No service health data yet");
+  state.profileSummary = buildProfileSummary({ station, aprsStatus, insights, sources, system });
+}
+
 function renderHighlights({ records, insights }) {
   const byType = recordByType(records);
   const insightCards = insightHighlightLines(insights).map((line) => {
@@ -1088,11 +1283,43 @@ function renderOverview({ sources, adsb, aprs, aprsStatus, captures, events, sys
   renderAprsCard(aprs, aprsStatus);
   renderSatelliteCard(captures, events);
   renderSystemCard(system, sources);
+  renderStationProfile({ station: state.station, sources, aprsStatus, insights, system });
+  renderVisuals({ aprs, adsb, sources, insights, system });
   renderHighlights({ records, insights });
   renderRecordsAndAlerts({ sources, adsb, aprs, captures, system });
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
   setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20, insights));
   setText("overview-updated", `updated ${fmtTime(new Date().toISOString())}`);
+}
+
+async function copyProfileSummary() {
+  const button = $("copy-profile-summary");
+  const summary = state.profileSummary || "RFLens Node: RF Node";
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(summary);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = summary;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    if (button) {
+      button.textContent = "Copied";
+      setTimeout(() => { button.textContent = "Copy profile summary"; }, 1600);
+    }
+  } catch (error) {
+    console.warn("Profile summary copy failed", error);
+    if (button) {
+      button.textContent = "Copy failed";
+      setTimeout(() => { button.textContent = "Copy profile summary"; }, 1600);
+    }
+  }
 }
 
 function showAdsbFallback(configured) {
@@ -1154,6 +1381,7 @@ document.querySelectorAll(".tab").forEach((button) => {
 document.addEventListener("click", (event) => {
   const tabButton = event.target.closest("[data-open-tab]");
   if (tabButton) switchTab(tabButton.dataset.openTab);
+  if (event.target.closest("#copy-profile-summary")) copyProfileSummary();
   const recordCard = event.target.closest("[data-record-type]");
   if (recordCard) showRecordModal(recordCard.dataset.recordType);
   const modalClose = event.target.closest("[data-close-record-modal]");

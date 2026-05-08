@@ -19,10 +19,12 @@
 
     <nav class="tabs" aria-label="RFLens views">
       <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
+      <button class="tab" type="button" data-tab="profile">Station Profile</button>
       <button class="tab" type="button" data-tab="overview">Station Overview</button>
+      <button class="tab" type="button" data-tab="aprs">APRS</button>
       <button class="tab" type="button" data-tab="adsb">ADS-B</button>
-      <button class="tab" type="button" data-tab="events">Events</button>
-      <button class="tab" type="button" data-tab="captures">Captures</button>
+      <button class="tab" type="button" data-tab="events">Timeline</button>
+      <button class="tab" type="button" data-tab="captures">Captures / Services</button>
     </nav>
 
     <main>
@@ -239,6 +241,38 @@
               </section>
             </div>
           </section>
+          <section class="visual-panel" aria-label="Station visual summaries">
+            <div class="panel-head compact-head">
+              <h2>Station Visuals</h2>
+              <span>today</span>
+            </div>
+            <div class="visual-grid">
+              <section class="visual-card">
+                <h3>APRS Heard Categories</h3>
+                <div id="visual-aprs-categories" class="donut-wrap">No data yet</div>
+              </section>
+              <section class="visual-card">
+                <h3>APRS Activity By Hour</h3>
+                <div id="visual-aprs-hourly" class="bar-chart">No data yet</div>
+              </section>
+              <section class="visual-card">
+                <h3>Top Heard Digipeaters</h3>
+                <div id="visual-aprs-digis" class="rank-bars">No data yet</div>
+              </section>
+              <section class="visual-card">
+                <h3>Station Types Heard</h3>
+                <div id="visual-station-types" class="rank-bars">No data yet</div>
+              </section>
+              <section class="visual-card visual-card-wide">
+                <h3>ADS-B Summary</h3>
+                <div id="visual-adsb-summary" class="metric-strip">No data yet</div>
+              </section>
+              <section class="visual-card visual-card-wide">
+                <h3>Station Services</h3>
+                <div id="visual-services" class="service-strip">No data yet</div>
+              </section>
+            </div>
+          </section>
           <div class="overview-grid">
             <section class="overview-card">
               <h3>ADS-B</h3>
@@ -330,6 +364,96 @@
           <div class="overview-actions">
             <button class="secondary-button" type="button" data-open-tab="adsb">Open ADS-B Map</button>
           </div>
+        </article>
+      </section>
+
+      <section class="tab-panel" id="tab-aprs">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>APRS Detail</h2>
+              <p>Recent RF, digipeated, and network-side APRS observations.</p>
+            </div>
+            <span id="aprs-tab-count">0</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Callsign</th>
+                  <th>Packet</th>
+                </tr>
+              </thead>
+              <tbody id="aprs-tab-table"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="tab-panel" id="tab-profile">
+        <article class="panel station-profile-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Station Profile</h2>
+              <p>Shareable snapshot of this local RF node.</p>
+            </div>
+            <button class="secondary-button compact-button" type="button" id="copy-profile-summary">Copy profile summary</button>
+          </div>
+          <section class="station-profile-hero">
+            <div>
+              <span>RFLens Node</span>
+              <strong id="profile-station-name">RF Node</strong>
+              <p id="profile-station-subtitle">See what your station hears.</p>
+            </div>
+            <div class="profile-status-pill" id="profile-local-first">Local-first</div>
+          </section>
+          <section class="station-profile-grid">
+            <section class="profile-card">
+              <h3>Who / Where</h3>
+              <dl>
+                <div><dt>Callsign</dt><dd id="profile-callsign">No data yet</dd></div>
+                <div><dt>Grid</dt><dd id="profile-grid">No data yet</dd></div>
+                <div><dt>Lat / lon</dt><dd id="profile-location">No data yet</dd></div>
+                <div><dt>Station mode</dt><dd>Local-first dashboard</dd></div>
+              </dl>
+            </section>
+            <section class="profile-card">
+              <h3>APRS Reach Today</h3>
+              <dl>
+                <div><dt>RF packets heard total</dt><dd id="profile-aprs-packets-total">No data yet</dd></div>
+                <div><dt>Unique APRS callsigns</dt><dd id="profile-aprs-unique">No data yet</dd></div>
+                <div><dt>APRS packets today</dt><dd id="profile-aprs-packets-today">No data yet</dd></div>
+                <div><dt>Direct RF heard</dt><dd id="profile-direct-rf-today">No data yet</dd></div>
+                <div><dt>Digipeated RF heard</dt><dd id="profile-digipeated-rf-today">No data yet</dd></div>
+                <div><dt>Farthest direct APRS</dt><dd id="profile-farthest-direct">No data yet</dd></div>
+                <div><dt>Farthest digipeated APRS</dt><dd id="profile-farthest-digipeated">No data yet</dd></div>
+              </dl>
+            </section>
+            <section class="profile-card">
+              <h3>iGate Honesty</h3>
+              <dl>
+                <div><dt>APRS-IS connected</dt><dd id="profile-aprs-is-connected">No data yet</dd></div>
+                <div><dt>APRS-IS verified</dt><dd id="profile-aprs-is-verified">No data yet</dd></div>
+                <div><dt>Last APRS packet</dt><dd id="profile-last-aprs">No data yet</dd></div>
+                <div><dt>Gate eligible today</dt><dd id="profile-gate-eligible">No data yet</dd></div>
+                <div><dt>Local gate confirmed</dt><dd id="profile-gate-confirmed">No data yet</dd></div>
+              </dl>
+              <p class="profile-note" id="profile-gate-note">No APRS-IS proof yet that this station gated a packet today.</p>
+            </section>
+            <section class="profile-card">
+              <h3>ADS-B Range Today</h3>
+              <dl>
+                <div><dt>ADS-B range today</dt><dd id="profile-adsb-range">No data yet</dd></div>
+                <div><dt>Highest aircraft</dt><dd id="profile-adsb-altitude">No data yet</dd></div>
+                <div><dt>Strongest signal</dt><dd id="profile-adsb-signal">No data yet</dd></div>
+              </dl>
+            </section>
+            <section class="profile-card profile-card-wide">
+              <h3>Station Services</h3>
+              <div class="profile-services" id="profile-services">No data yet</div>
+            </section>
+          </section>
         </article>
       </section>
 

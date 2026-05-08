@@ -607,6 +607,10 @@ dd {
   color: var(--red);
 }
 
+.profile-service.system strong {
+  color: var(--cyan);
+}
+
 #tab-adsb.active {
   margin: calc(clamp(1rem, 3vw, 2rem) * -1);
 }

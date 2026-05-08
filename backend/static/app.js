@@ -817,7 +817,7 @@ function renderVisuals({ aprs, adsb, sources, insights, system }) {
     ["Highest today", fallbackText(daily.adsb_highest_altitude_today)],
     ["Strongest signal", fallbackText(daily.adsb_strongest_signal_today)],
   ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join(""));
-  setHtml("visual-services", sources.length ? sources.map(profileServiceHtml).join("") : serviceHealthSummary(sources, system));
+  setHtml("visual-services", stationHealthCards(sources, system));
 }
 
 function renderAdsbTable(events) {
@@ -1041,17 +1041,30 @@ function profileServiceHtml(source) {
   `;
 }
 
-function serviceHealthSummary(sources, system) {
-  const liveSources = sources.filter((source) => sourceStatus(source) === "online").length;
-  const parts = [];
-  if (sources.length) parts.push(`${liveSources}/${sources.length} sources online`);
-  const cpu = formatPercent(system?.cpu_percent);
-  if (cpu !== "No data yet") parts.push(`CPU ${cpu}`);
-  const memory = formatPercent(system?.memory?.percent);
-  if (memory !== "No data yet") parts.push(`memory ${memory}`);
-  const disk = formatPercent(system?.disk?.percent);
-  if (disk !== "No data yet") parts.push(`disk ${disk}`);
-  return parts.join(", ") || "No service health data yet";
+function systemHealthItems(system) {
+  return [
+    ["CPU", formatPercent(system?.cpu_percent)],
+    ["Memory", formatPercent(system?.memory?.percent)],
+    ["Disk", formatPercent(system?.disk?.percent)],
+  ].filter(([, value]) => value !== "No data yet");
+}
+
+function systemHealthHtml(system) {
+  const items = systemHealthItems(system);
+  if (!items.length) return "";
+  return `
+    <div class="profile-service system">
+      <strong>System</strong>
+      <span>${items.map(([label, value]) => `${esc(label)} ${esc(value)}`).join(" · ")}</span>
+    </div>
+  `;
+}
+
+function stationHealthCards(sources, system) {
+  const cards = sources.map(profileServiceHtml);
+  const systemCard = systemHealthHtml(system);
+  if (systemCard) cards.push(systemCard);
+  return cards.join("") || "No service health data yet";
 }
 
 function cleanSnapshotValue(value) {
@@ -1070,21 +1083,15 @@ function snapshotMetric(value) {
   return cleanSnapshotValue(value);
 }
 
-function snapshotPercentLine(label, value) {
-  const formatted = formatPercent(value);
-  return formatted === "No data yet" ? "" : `${label}: ${formatted}`;
-}
-
 function stationHealthLines(sources, system) {
   const lines = [];
   if (sources.length) {
     const liveSources = sources.filter((source) => sourceStatus(source) === "online").length;
     lines.push(`${liveSources}/${sources.length} sources online`);
   }
-  const cpu = snapshotPercentLine("CPU", system?.cpu_percent);
-  if (cpu) lines.push(cpu);
-  const disk = snapshotPercentLine("Disk", system?.disk?.percent);
-  if (disk) lines.push(disk);
+  systemHealthItems(system).forEach(([label, value]) => {
+    lines.push(`${label}: ${value}`);
+  });
   return lines;
 }
 
@@ -1146,7 +1153,7 @@ function renderStationProfile({ station, sources, aprsStatus, insights, system }
   setText("profile-adsb-range", fallbackText(daily.adsb_max_range_today));
   setText("profile-adsb-altitude", fallbackText(daily.adsb_highest_altitude_today));
   setText("profile-adsb-signal", fallbackText(daily.adsb_strongest_signal_today));
-  setHtml("profile-services", sources.length ? sources.map(profileServiceHtml).join("") : "No service health data yet");
+  setHtml("profile-services", stationHealthCards(sources, system));
   state.profileSummary = buildProfileSummary({ station, aprsStatus, insights, sources, system });
 }
 

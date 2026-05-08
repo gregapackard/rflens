@@ -63,6 +63,20 @@ time,
   color: var(--muted);
 }
 
+.topbar .tagline {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.topbar .subline {
+  margin-top: 0.15rem;
+}
+
+.topbar #station {
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+}
+
 .pulse {
   border: 1px solid var(--line);
   border-radius: 999px;

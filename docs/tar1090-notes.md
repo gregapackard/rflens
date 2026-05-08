@@ -1,19 +1,19 @@
-# tar1090 Notes for RF Lens
+# tar1090 Notes for RFLens
 
-tar1090 is an ADS-B web interface for readsb / dump1090-fa. RF Lens should not copy tar1090 wholesale, but several ideas fit the local multi-RF dashboard.
+tar1090 is an ADS-B web interface for readsb / dump1090-fa. RFLens should not copy tar1090 wholesale, but several ideas fit the local ham station dashboard.
 
 ## Useful Patterns
 
 - Layered map design: tar1090 separates base maps, aircraft icons, trails, receiver/site circles, and optional overlays.
-- Offline/local maps: tar1090 supports offline tiles as a map layer. RF Lens mirrors this with `/ui/tiles/osm/{z}/{x}/{y}.png`.
-- Range rings: tar1090 has receiver-centered site circles. RF Lens uses station range rings in the Map tab.
-- Aircraft visual state: tar1090 styles aircraft by properties such as type, altitude, data source, selection, and stale state. RF Lens currently uses source-specific icons plus fresh/stale classes.
-- Tracks/history: tar1090 emphasizes tracks and adjustable history. RF Lens should eventually add short local-only aircraft trails using recent event history.
-- Map controls: tar1090 exposes map layer selection and display toggles. RF Lens now has a local tile overlay toggle and can grow into label/trail toggles.
+- Offline/local maps: tar1090 supports offline tiles as a map layer. RFLens mirrors this with `/ui/tiles/osm/{z}/{x}/{y}.png`.
+- Range rings: tar1090 has receiver-centered site circles. RFLens uses station range rings where map views are enabled.
+- Aircraft visual state: tar1090 styles aircraft by properties such as type, altitude, data source, selection, and stale state. RFLens should surface the station-relevant parts: local range, aircraft counts, signal quality, and freshness.
+- Tracks/history: tar1090 emphasizes tracks and adjustable history. RFLens should keep short local-only aircraft history only where it supports station range awareness.
+- Map controls: tar1090 exposes map layer selection and display toggles. RFLens can grow map controls only where they support local station observability.
 
-## RF Lens Integration Direction
+## RFLens Integration Direction
 
-- Keep Leaflet and vanilla JS for the RF Lens frontend.
+- Keep Leaflet and vanilla JS for the RFLens frontend.
 - Keep all tiles, icons, and scripts local under `backend/static/`.
 - Avoid public tile requests from the browser.
 - Prefer lightweight in-memory animation and stale fading over long browser-side history for now.

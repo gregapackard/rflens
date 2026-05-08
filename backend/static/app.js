@@ -629,7 +629,7 @@ function renderOverviewFeed(events, sources, targetId, limit = 20, insights = {}
         <time>waiting</time>
         <strong>RFLens is listening</strong>
         <span>insight</span>
-        <p>No notable APRS or ADS-B observations are available yet</p>
+        <p>No notable APRS, ADS-B, or station health observations are available yet</p>
       </div>
     `}
   `);
@@ -675,7 +675,7 @@ function fallbackText(value) {
 
 function renderInsights(insights = {}) {
   const summary = Array.isArray(insights.summary) ? insights.summary : [];
-  setHtml("insights-summary", (summary.length ? summary : ["RFLens is waiting for fresh RF observations."]).slice(0, 6).map((line) => `
+  setHtml("insights-summary", (summary.length ? summary : ["RFLens is waiting for fresh station observations."]).slice(0, 6).map((line) => `
     <article class="insight-card">
       <p>${esc(line)}</p>
     </article>

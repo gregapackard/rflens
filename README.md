@@ -1,8 +1,10 @@
 # RFLens
 
+See what your station hears.
+
 RFLens helps amateur radio operators see, measure, and improve their RF footprint across APRS, ADS-B, satellite/weather captures, and local SDR services — using affordable hardware and open-source software.
 
-It gives hams, RF experimenters, and homelab operators a plain-English view of what their station is hearing, how those signals arrived, how far away they were, and whether local RF services are healthy.
+RFLens is a local-first ham radio observability dashboard for APRS, ADS-B, and station health. It gives hams, RF experimenters, clubs, and homelab operators a plain-English view of what their station is hearing, how those signals arrived, how far away they were, and whether local RF services are healthy.
 
 It combines:
 - APRS packets from Direwolf
@@ -11,9 +13,9 @@ It combines:
 - Local SDR/service health
 - SQLite-backed event history and RF insights
 
-For ADS-B map rendering, RFLens intentionally reuses the local readsb/tar1090 web UI instead of reimplementing a full aircraft tracker. tar1090 is the recommended ADS-B map renderer; RFLens focuses on unified RF dashboarding, service health, event timelines, APRS overview, SatDump capture/pass status, and links or embeds to best-in-class tools.
+For ADS-B map rendering, RFLens intentionally reuses the local readsb/tar1090 web UI instead of reimplementing a full aircraft tracker. tar1090 is the recommended ADS-B map renderer; RFLens focuses on station-forward dashboarding, service health, timelines, APRS reach, ADS-B range, SatDump capture/pass status, and links or embeds to best-in-class tools.
 
-RFLens is built for operational awareness on a 24/7 RF closet node, homelab, field station, or Hamvention demo.
+RFLens is built for operating awareness on a 24/7 ham station node, homelab, club demo, field station, or Hamvention table.
 
 ## What RFLens Is For
 
@@ -46,6 +48,22 @@ SatDump capture watching and capture event history.
 ### Local SDR services
 
 API, ingestor, radio pipeline, and source health visibility.
+
+## Product Direction
+
+RFLens is becoming a clearer station intelligence layer for amateur radio operators:
+
+- APRS is the flagship mode: callsigns, station hints, direct RF, digipeated RF, APRS-IS/network-side observations, iGate honesty, audio quality, reach, and daily notable packets.
+- ADS-B is an RF range and aircraft awareness module: local aircraft counts, range records, signal quality, and tar1090 integration.
+- Station health is the operating layer: source state, service health, system load, timelines, and local SDR pipeline visibility.
+- Future integrations should support ham station observability. RFLens should stay station-forward, callsign-forward, club-demo-friendly, and focused on operating.
+
+## What RFLens Is Not
+
+- RFLens is not a SIGINT suite.
+- RFLens is not a scanner suite or a decode-everything SDR platform.
+- RFLens is not a replacement for Direwolf, readsb, tar1090, SatDump, or OpenWebRX; it sits above local tools and explains what the station is hearing.
+- RFLens does not claim a packet was gated by the local station unless APRS-IS path proof exists, such as `qAR`, `qAO`, or `qAS` with the local callsign.
 
 ## Setup
 
@@ -85,9 +103,9 @@ adsb_ui:
 
 If `adsb_ui.enabled` is false or `adsb_ui.url` is empty, RFLens shows a setup message instead of the iframe. If the iframe cannot load, RFLens shows an "Open ADS-B Map" button that opens tar1090 in a new tab. ADS-B ingestion still runs through RFLens so dashboard counts, event tables, and historical observability keep working.
 
-## RF Overview
+## Station Overview
 
-The RF Overview tab is a text-based operations dashboard. It summarizes ADS-B aircraft counts and max range, APRS stations and packet timing, SatDump capture/pass status, system CPU/disk usage, SDR source health, and the newest cross-source RF events. It does not contain a map.
+The Station Overview tab is a text-based operating dashboard. It summarizes ADS-B aircraft counts and max range, APRS stations and packet timing, SatDump capture/pass status, system CPU/disk usage, SDR source health, and the newest station timeline events. It does not contain a map.
 
 ## Run Everything
 
@@ -201,8 +219,8 @@ New capture folders and image files are inserted into the captures table and mir
 - `GET /api/system`
 - `GET /api/sources`
 - `GET /api/events/recent?limit=100`
-- `GET /api/aprs/recent?limit=1000`
-- `GET /api/adsb/recent?limit=1000`
+- `GET /api/aprs/recent?limit=100`
+- `GET /api/adsb/recent?limit=100`
 - `GET /api/captures`
 - `POST /api/events`
 

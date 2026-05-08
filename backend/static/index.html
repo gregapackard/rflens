@@ -10,14 +10,16 @@
     <header class="topbar">
       <div>
         <h1>RFLens</h1>
-        <p id="station">Local RF observability</p>
+        <p class="tagline">See what your station hears.</p>
+        <p class="subline">APRS, ADS-B, and station health for your local RF node.</p>
+        <p id="station">RF Node</p>
       </div>
       <div class="pulse" id="health">connecting</div>
     </header>
 
     <nav class="tabs" aria-label="RFLens views">
       <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
-      <button class="tab" type="button" data-tab="overview">RF Overview</button>
+      <button class="tab" type="button" data-tab="overview">Station Overview</button>
       <button class="tab" type="button" data-tab="adsb">ADS-B</button>
       <button class="tab" type="button" data-tab="events">Events</button>
       <button class="tab" type="button" data-tab="captures">Captures</button>
@@ -110,7 +112,7 @@
         <section class="layout">
           <article class="panel feed-panel">
             <div class="panel-head">
-              <h2>Live RF Event Feed</h2>
+              <h2>Station Timeline</h2>
               <span id="event-count">0</span>
             </div>
             <div class="feed" id="event-feed"></div>
@@ -180,14 +182,14 @@
       <section class="tab-panel" id="tab-overview">
         <article class="panel overview-panel">
           <div class="panel-head">
-            <h2>RF Overview</h2>
+            <h2>Station Overview</h2>
             <span id="overview-updated">waiting</span>
           </div>
           <section class="insights-panel" aria-label="RFLens Insights">
             <div class="insights-head">
               <div>
                 <h2>RFLens Insights</h2>
-                <p>Plain-English observations from the packets and aircraft your node heard.</p>
+                <p>Plain-English observations from APRS packets, ADS-B aircraft, and station health.</p>
               </div>
               <div class="insights-actions">
                 <button class="secondary-button compact-button" type="button" data-open-tab="events">Raw Events</button>
@@ -320,7 +322,7 @@
           </section>
           <section class="overview-events">
             <div class="panel-head compact-head">
-              <h2>Recent RF Events</h2>
+              <h2>Recent Station Timeline</h2>
               <span id="overview-events-count">0</span>
             </div>
             <div class="feed" id="overview-event-feed"></div>
@@ -356,7 +358,7 @@
         <section class="layout">
           <article class="panel feed-panel">
             <div class="panel-head">
-              <h2>Live RF Event Feed</h2>
+              <h2>Station Timeline</h2>
               <span id="events-tab-count">0</span>
             </div>
             <div class="event-filters" aria-label="Events tab filters">

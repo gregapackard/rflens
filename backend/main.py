@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import load_config
 from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_insights, fetch_records, init_db, insert_event
 from .models import EventIn
+from .system_stats import memory_stats_from_values, read_meminfo_memory
 
 
 app = FastAPI(title="RFLens")
@@ -75,12 +76,7 @@ def system() -> dict[str, object]:
 
         cpu_usage = psutil.cpu_percent(interval=None)
         memory_info = psutil.virtual_memory()
-        memory = {
-            "total": memory_info.total,
-            "used": memory_info.used,
-            "available": memory_info.available,
-            "percent": memory_info.percent,
-        }
+        memory = memory_stats_from_values(memory_info.total, memory_info.available)
     except Exception:
         try:
             load_1m = os.getloadavg()[0]
@@ -88,6 +84,7 @@ def system() -> dict[str, object]:
             cpu_usage = min(100.0, max(0.0, (load_1m / cpu_count) * 100))
         except (AttributeError, OSError):
             cpu_usage = None
+        memory = read_meminfo_memory()
     return {
         "cpu_percent": cpu_usage,
         "disk": {

@@ -1054,19 +1054,63 @@ function serviceHealthSummary(sources, system) {
   return parts.join(", ") || "No service health data yet";
 }
 
+function cleanSnapshotValue(value) {
+  if (!hasValue(value)) return "";
+  const text = String(value)
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || /^(no data yet|unknown|null|undefined|nan)$/i.test(text)) return "";
+  return text
+    .replace(/\bat approximately\b/gi, "—")
+    .replace(/\s+—\s+/g, " — ")
+    .trim();
+}
+
+function snapshotMetric(value) {
+  return cleanSnapshotValue(value);
+}
+
+function snapshotPercentLine(label, value) {
+  const formatted = formatPercent(value);
+  return formatted === "No data yet" ? "" : `${label}: ${formatted}`;
+}
+
+function stationHealthLines(sources, system) {
+  const lines = [];
+  if (sources.length) {
+    const liveSources = sources.filter((source) => sourceStatus(source) === "online").length;
+    lines.push(`${liveSources}/${sources.length} sources online`);
+  }
+  const cpu = snapshotPercentLine("CPU", system?.cpu_percent);
+  if (cpu) lines.push(cpu);
+  const disk = snapshotPercentLine("Disk", system?.disk?.percent);
+  if (disk) lines.push(disk);
+  return lines;
+}
+
 function buildProfileSummary({ station, aprsStatus, insights, sources, system }) {
   const daily = insights?.daily || {};
+  const stationName = cleanSnapshotValue(station?.name) || "unknown";
+  const callsign = cleanSnapshotValue(aprsStatus?.callsign) || "unknown";
+  const grid = cleanSnapshotValue(station?.grid) || "unknown";
+  const aprsPackets = formatInteger(daily.aprs_packets_heard_today, "unknown");
+  const direct = snapshotMetric(daily.farthest_direct_rf_today);
+  const digipeated = snapshotMetric(daily.farthest_digipeated_rf_today);
+  const adsbRange = snapshotMetric(daily.adsb_max_range_today);
+  const health = stationHealthLines(sources, system);
   const lines = [
-    `RFLens Node: ${station?.name || "RF Node"}`,
-    `Grid: ${station?.grid || "unknown"}`,
+    `${stationName} — RFLens Station Snapshot`,
+    "",
+    `Callsign: ${callsign}`,
+    `Grid: ${grid}`,
+    "",
+    "Today's APRS:",
+    `${aprsPackets} packets heard`,
   ];
-  const callsign = aprsStatus?.callsign;
-  if (callsign) lines.push(`Callsign: ${callsign}`);
-  lines.push(`APRS heard today: ${fallbackText(daily.aprs_packets_heard_today)} packets`);
-  lines.push(`Farthest direct APRS: ${fallbackText(daily.farthest_direct_rf_today)}`);
-  lines.push(`Farthest digipeated APRS: ${fallbackText(daily.farthest_digipeated_rf_today)}`);
-  lines.push(`ADS-B max range: ${fallbackText(daily.adsb_max_range_today)}`);
-  lines.push(`Station services: ${serviceHealthSummary(sources, system)}`);
+  if (direct) lines.push(`Farthest direct APRS: ${direct}`);
+  if (digipeated) lines.push(`Farthest digipeated APRS: ${digipeated}`);
+  if (adsbRange) lines.push("", "ADS-B:", `Max range today: ${adsbRange}`);
+  if (health.length) lines.push("", "Station Health:", ...health);
   return lines.join("\n");
 }
 
@@ -1310,7 +1354,7 @@ async function copyProfileSummary() {
       textarea.remove();
     }
     if (button) {
-      button.textContent = "Copied";
+      button.textContent = "Copied station snapshot";
       setTimeout(() => { button.textContent = "Copy profile summary"; }, 1600);
     }
   } catch (error) {

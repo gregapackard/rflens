@@ -17,6 +17,7 @@ const state = {
   selectedAprsEvents: [],
   selectedAprsEventsByCallsign: {},
   aprsStationSort: "packet_count_desc",
+  aprsStationsExpanded: false,
   profileSummary: "",
   allTimeRecords: [],
   records: {
@@ -33,6 +34,7 @@ const state = {
 
 const DATA_FETCH_LIMIT = 250;
 const EVENT_FEED_LIMIT = 30;
+const APRS_STATION_DEFAULT_LIMIT = 24;
 const HEALTH_REFRESH_MS = 5000;
 const DASHBOARD_REFRESH_MS = 30000;
 const LIVE_SECONDS = 60;
@@ -879,9 +881,22 @@ function renderAprsStations(events) {
   });
   const rows = sortAprsStationRows(Object.entries(groups)
     .map(([callsign, stationEvents]) => ({ callsign, events: stationEvents, summary: stationSummary(stationEvents) })));
+  const total = rows.length;
+  const visibleRows = state.aprsStationsExpanded ? rows : rows.slice(0, APRS_STATION_DEFAULT_LIMIT);
+  const toggle = $("aprs-stations-toggle");
+  const showing = $("aprs-stations-showing");
 
-  setText("aprs-tab-count", `${rows.length.toLocaleString()} stations`);
-  setHtml("aprs-stations-list", rows.map(({ callsign, events: stationEvents, summary }) => {
+  setText("aprs-tab-count", `${total.toLocaleString()} stations`);
+  if (showing) {
+    showing.textContent = state.aprsStationsExpanded
+      ? `Showing all ${total.toLocaleString()} stations`
+      : `Showing top ${Math.min(APRS_STATION_DEFAULT_LIMIT, total).toLocaleString()} of ${total.toLocaleString()} stations`;
+  }
+  if (toggle) {
+    toggle.hidden = total <= APRS_STATION_DEFAULT_LIMIT;
+    toggle.textContent = state.aprsStationsExpanded ? `Show top ${APRS_STATION_DEFAULT_LIMIT}` : `Show all ${total.toLocaleString()}`;
+  }
+  setHtml("aprs-stations-list", visibleRows.map(({ callsign, events: stationEvents, summary }) => {
     const metadata = summary.latestMetadata;
     const distance = summary.bestDistance ? stationDetailDistance(summary.bestDistance) : "";
     const category = stationCategorySummary(summary);
@@ -1809,6 +1824,12 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("#clear-aprs-station")) {
     event.preventDefault();
     clearAprsStation();
+    return;
+  }
+  if (event.target.closest("#aprs-stations-toggle")) {
+    event.preventDefault();
+    state.aprsStationsExpanded = !state.aprsStationsExpanded;
+    renderAprsStations(state.latestAprs);
     return;
   }
   const tabButton = event.target.closest("[data-open-tab]");

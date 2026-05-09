@@ -705,6 +705,18 @@ dd {
   font-size: 0.86rem;
 }
 
+.station-list-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0 1rem 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .aprs-station-detail.empty {
   color: var(--muted);
 }

@@ -2128,7 +2128,33 @@ function switchTab(tabName) {
 }
 
 function scrollToAppTop() {
-  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  const targets = [
+    document.scrollingElement,
+    document.documentElement,
+    document.body,
+    document.querySelector(".app"),
+    document.querySelector("main"),
+    document.querySelector(".content"),
+    document.querySelector(".tab-panel.active"),
+  ].filter(Boolean);
+
+  targets.forEach((target) => {
+    target.scrollTop = 0;
+    target.scrollLeft = 0;
+    if (typeof target.scrollTo === "function") {
+      try {
+        target.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      } catch {
+        target.scrollTop = 0;
+        target.scrollLeft = 0;
+      }
+    }
+  });
+
+  const topbar = document.querySelector(".topbar");
+  if (topbar && typeof topbar.scrollIntoView === "function") {
+    topbar.scrollIntoView({ behavior: "auto", block: "start" });
+  }
 }
 
 function selectAprsStation(callsign, openTab = true) {
@@ -2160,6 +2186,7 @@ function clearAprsStation() {
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => {
     switchTab(button.dataset.tab);
+    scrollToAppTop();
     requestAnimationFrame(scrollToAppTop);
   });
 });
@@ -2187,6 +2214,7 @@ document.addEventListener("click", (event) => {
   if (tabButton) {
     switchTab(tabButton.dataset.openTab);
     if (tabButton.dataset.scrollTop === "true") {
+      scrollToAppTop();
       requestAnimationFrame(scrollToAppTop);
     }
   }

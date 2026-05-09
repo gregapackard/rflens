@@ -188,6 +188,21 @@ function sourceStatus(source) {
   return source.status || "unknown";
 }
 
+function sourceDotStatus(source) {
+  const status = String(source?.status || "").trim();
+  if (status) return status;
+  if (source?.last_seen && secondsAgo(source.last_seen) <= LIVE_SECONDS) return "recent";
+  return "unknown";
+}
+
+function sourceDotClass(source) {
+  const text = sourceDotStatus(source).toLowerCase();
+  if (/(error|offline|failed|disconnected|down)/.test(text)) return "bad";
+  if (/(online|healthy|connected|active|running|recent)/.test(text)) return "ok";
+  if (/(unknown|waiting|idle|stale|enabled|configured|missing|malformed|warn|no recent|no data)/.test(text)) return "warn";
+  return "warn";
+}
+
 function expectedLive(source) {
   return ["aprs", "adsb", "satellite"].includes(source?.type);
 }
@@ -644,11 +659,11 @@ function renderHeaderStatus(sources = state.latestSources, system = state.latest
     const key = String(source.id ?? source.type ?? source.name ?? "");
     if (!key || seen.has(key)) return;
     seen.add(key);
-    const status = sourceStatus(source);
+    const status = sourceDotStatus(source);
     const label = compactStatusSourceLabel(source);
-    if (!label || /^(unknown|null|undefined)$/i.test(status)) return;
+    if (!label) return;
     servicePills.push({
-      className: statusClass(status),
+      className: sourceDotClass(source),
       label,
       status,
     });

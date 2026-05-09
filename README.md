@@ -1,69 +1,88 @@
 # RFLens
 
-See what your station hears.
+**See what your station hears.**
 
-RFLens helps amateur radio operators see, measure, and improve their RF footprint across APRS, ADS-B, satellite/weather captures, and local SDR services — using affordable hardware and open-source software.
+RFLens is a local-first ham radio observability dashboard for APRS, ADS-B, and station health. It helps amateur radio operators see, measure, and improve their RF footprint using affordable hardware and open-source software.
 
-RFLens is a local-first ham radio observability dashboard for APRS, ADS-B, and station health. It gives hams, RF experimenters, clubs, and homelab operators a plain-English view of what their station is hearing, how those signals arrived, how far away they were, and whether local RF services are healthy.
+> RFLens is early alpha software. It is currently best suited for technical users comfortable with Linux, Direwolf, readsb/tar1090, and editing YAML configuration files.
 
-It combines:
-- APRS packets from Direwolf
-- ADS-B aircraft data from readsb/tar1090
-- Satellite and weather captures from SatDump
-- Local SDR/service health
-- SQLite-backed event history and RF insights
+RFLens is ham-forward, station-forward, callsign-forward, club-demo-friendly, and focused on operating. It sits above local ham and RF tools and explains what the station is hearing.
 
-For ADS-B map rendering, RFLens intentionally reuses the local readsb/tar1090 web UI instead of reimplementing a full aircraft tracker. tar1090 is the recommended ADS-B map renderer; RFLens focuses on station-forward dashboarding, service health, timelines, APRS reach, ADS-B range, SatDump capture/pass status, and links or embeds to best-in-class tools.
+## Why RFLens?
 
-RFLens is built for operating awareness on a 24/7 ham station node, homelab, club demo, field station, or Hamvention table.
-
-## What RFLens Is For
+Most ham radio tools are excellent at one job: Direwolf decodes APRS, readsb/tar1090 handles ADS-B, and SatDump captures satellites. RFLens sits above those local tools and turns station activity into a clean operating dashboard.
 
 RFLens is designed to answer practical station questions:
 
-- What did my antenna hear today?
-- Was that packet direct, digipeated, or network-side?
-- How far away was it?
-- What was the farthest direct RF heard today?
-- What was digipeated versus actually heard direct?
-- Is my iGate connected and eligible to gate?
-- Was gating confirmed or unconfirmed?
-- Which RF services are healthy?
-- Are my SDR services running cleanly?
+- What is my station hearing today?
+- What was direct RF versus digipeated or network-side?
+- How far is my APRS and ADS-B receive footprint?
+- Are my local RF services healthy?
+- What changed over time?
 
-## Current Scope
+## What RFLens Is
 
-### APRS
-
-RF-heard packets, station hints, distance, audio/decode quality, iGate status, and gating evidence. RFLens uses honest RF language. It should distinguish direct RF, digipeated RF, APRS-IS/network-side observations, gate eligible, gate unconfirmed, and confirmed gated. Do not claim a packet was gated by the local station unless APRS-IS path evidence confirms it, such as `qAR`, `qAO`, or `qAS` with the local callsign.
-
-### ADS-B
-
-readsb ingestion, aircraft events, local range/count summaries, and tar1090 integration for map rendering.
-
-### Satellite/weather captures
-
-SatDump capture watching and capture event history.
-
-### Local SDR services
-
-API, ingestor, radio pipeline, and source health visibility.
-
-## Product Direction
-
-RFLens is becoming a clearer station intelligence layer for amateur radio operators:
-
-- APRS is the flagship mode: callsigns, station hints, direct RF, digipeated RF, APRS-IS/network-side observations, iGate honesty, audio quality, reach, and daily notable packets.
-- ADS-B is an RF range and aircraft awareness module: local aircraft counts, range records, signal quality, and tar1090 integration.
-- Station health is the operating layer: source state, service health, system load, timelines, and local SDR pipeline visibility.
-- Future integrations should support ham station observability. RFLens should stay station-forward, callsign-forward, club-demo-friendly, and focused on operating.
+- A local-first observability layer for ham radio stations and RF nodes.
+- APRS station intelligence from Direwolf logs.
+- Direct RF, digipeated RF, and APRS-IS/network-side separation.
+- Honest iGate and gating proof language using APRS-IS path evidence when available.
+- ADS-B receiver performance summaries from readsb/tar1090 aircraft data.
+- Station health visibility for sources, CPU, memory, disk, and service state.
+- A shareable Station Profile snapshot for club demos, station notes, and operating context.
+- A dashboard for quick operating awareness.
 
 ## What RFLens Is Not
 
 - RFLens is not a SIGINT suite.
-- RFLens is not a scanner suite or a decode-everything SDR platform.
-- RFLens is not a replacement for Direwolf, readsb, tar1090, SatDump, or OpenWebRX; it sits above local tools and explains what the station is hearing.
-- RFLens does not claim a packet was gated by the local station unless APRS-IS path proof exists, such as `qAR`, `qAO`, or `qAS` with the local callsign.
+- RFLens is not a scanner suite.
+- RFLens is not a decode-everything SDR platform.
+- RFLens is not an iNTERCEPT clone.
+- RFLens is not a replacement for Direwolf, readsb, tar1090, SatDump, or OpenWebRX.
+- tar1090 remains the full ADS-B aircraft map and detail view.
+- RFLens focuses on receiver performance, station health, and notable observations.
+
+## Current Status
+
+RFLens is early alpha software.
+
+Good fit right now:
+
+- Linux users.
+- Hams already running or willing to run Direwolf.
+- Users with readsb/tar1090 for ADS-B.
+- People comfortable editing YAML and systemd service files.
+
+Not yet ideal for:
+
+- One-click installs.
+- Non-technical users.
+- Public internet exposure without review.
+
+## Features
+
+- Local-first FastAPI dashboard.
+- SQLite event history.
+- APRS ingest from Direwolf logs.
+- APRS station grid, sorting, show-more, and callsign drilldown.
+- Direct RF vs digipeated RF vs APRS-IS/network-side classification.
+- Conservative iGate confirmation using APRS-IS q-construct proof.
+- Direwolf MIC-E follow-up enrichment when available.
+- ADS-B summary from readsb aircraft data.
+- tar1090 embed/link for the full ADS-B map view.
+- Station Profile share snapshot.
+- System/source health: CPU, memory, disk, APRS, ADS-B, and SatDump.
+- No cloud dependency required.
+
+## Screenshots
+
+Screenshots will be added as the v0.1 alpha install flow stabilizes.
+
+Planned:
+
+- Dashboard
+- APRS Stations Heard
+- Station Profile
+- ADS-B Receiver Summary
 
 ## Setup
 
@@ -89,7 +108,7 @@ http://rflens:8080/ui
 http://rflens.local:8080/ui
 ```
 
-RFLens is hostname-friendly. The frontend uses relative `/api/...` and `/ui/...` paths, so it works through DNS, mDNS, or a reverse proxy such as `http://rflens/`.
+RFLens is hostname-friendly. The frontend uses relative `/api/...` and `/ui/...` paths, so it works through DNS, mDNS, or a reviewed reverse proxy such as `http://rflens/`.
 
 ## ADS-B Tracking
 
@@ -105,7 +124,7 @@ If `adsb_ui.enabled` is false or `adsb_ui.url` is empty, RFLens shows a setup me
 
 ## Station Overview
 
-The Station Overview tab is a text-based operating dashboard. It summarizes ADS-B aircraft counts and max range, APRS stations and packet timing, SatDump capture/pass status, system CPU/disk usage, SDR source health, and the newest station timeline events. It does not contain a map.
+The Station Overview tab is a text-based operating dashboard. It summarizes ADS-B aircraft counts and max range, APRS stations and packet timing, SatDump capture/pass status, system CPU/disk usage, SDR source health, and the newest station timeline events. It does not replace dedicated tools such as tar1090.
 
 ## Run Everything
 
@@ -119,7 +138,7 @@ Logs are written to `./data/logs/`.
 
 ## Run With systemd
 
-Production-style systemd unit files live in `deploy/systemd/`. They assume RFLens is installed at `/home/rfnode/rflens` with its virtualenv at `/home/rfnode/rflens/venv`.
+Technical-alpha systemd unit files live in `deploy/systemd/`. They assume RFLens is installed at `/home/rfnode/rflens` with its virtualenv at `/home/rfnode/rflens/venv`. Review paths, callsigns, device identifiers, and service permissions before using them on your station.
 
 Install and start the API, ADS-B ingestor, APRS radio pipeline, and APRS ingestor:
 
@@ -153,7 +172,7 @@ journalctl -u rflens-aprs-radio -f
 journalctl -u rflens-aprs -f
 ```
 
-The APRS radio unit runs `rtl_fm` for SDR serial `APRS001` at `144.390M` and pipes audio into Direwolf using `/home/rfnode/aprs/direwolf.conf`. It appends Direwolf output to `/home/rfnode/rflens/data/direwolf.log` with `tee`; RFLens tails that log from the APRS ingestor service.
+The APRS radio unit runs `rtl_fm` for the configured APRS SDR at `144.390M` and pipes audio into Direwolf using the configured Direwolf path. It appends Direwolf output to `data/direwolf.log` with `tee`; RFLens tails that log from the APRS ingestor service.
 
 Remove installed units:
 
@@ -187,7 +206,7 @@ Common paths are `/run/readsb/aircraft.json` and `/var/run/readsb/aircraft.json`
 
 ### APRS Direwolf
 
-For the MVP, RFLens tails a Direwolf text log:
+For the alpha, RFLens tails a Direwolf text log:
 
 ```yaml
 sources:
@@ -227,13 +246,43 @@ New capture folders and image files are inserted into the captures table and mir
 ## Project Principles
 
 - Local-first: RFLens runs on the operator's node and does not require cloud services for the dashboard.
+- Ham-forward: callsigns, station context, iGate language, and RF footprint matter.
+- Station-forward: RFLens explains what this local node is hearing and how healthy it is.
 - Affordable hardware: it is designed around practical SDRs and local RF node hardware.
 - Honest RF language: direct RF, digipeated RF, network-side, gate-eligible, gate-unconfirmed, and confirmed-gated observations should stay clearly separated.
 - Open-source software: it builds on tools such as Direwolf, readsb, tar1090, SatDump, SQLite, and FastAPI.
 - Operator-focused insight: the dashboard should explain what is notable, not just list raw rows.
+
+## GitHub Metadata
+
+Suggested repo description:
+
+```text
+Local-first ham radio observability dashboard for APRS, ADS-B, and station health.
+```
+
+Suggested topics:
+
+```text
+ham-radio
+amateur-radio
+aprs
+ads-b
+sdr
+rtl-sdr
+direwolf
+readsb
+tar1090
+fastapi
+sqlite
+station-monitoring
+rf
+observability
+```
 
 ## Notes
 
 - RFLens is local-only and does not call cloud APIs.
 - The frontend uses no external CDNs or assets.
 - SQLite data lives in `./data/rflens.db` by default.
+- Review any public internet exposure carefully; the alpha target is local station and trusted-network use.

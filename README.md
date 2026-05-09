@@ -253,32 +253,6 @@ New capture folders and image files are inserted into the captures table and mir
 - Open-source software: it builds on tools such as Direwolf, readsb, tar1090, SatDump, SQLite, and FastAPI.
 - Operator-focused insight: the dashboard should explain what is notable, not just list raw rows.
 
-## GitHub Metadata
-
-Suggested repo description:
-
-```text
-Local-first ham radio observability dashboard for APRS, ADS-B, and station health.
-```
-
-Suggested topics:
-
-```text
-ham-radio
-amateur-radio
-aprs
-ads-b
-sdr
-rtl-sdr
-direwolf
-readsb
-tar1090
-fastapi
-sqlite
-station-monitoring
-rf
-observability
-```
 
 ## Notes
 

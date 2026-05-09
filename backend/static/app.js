@@ -2127,6 +2127,10 @@ function switchTab(tabName) {
   if (tabName === "adsb") renderAdsbUi(state.adsbUi);
 }
 
+function scrollToAppTop() {
+  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+}
+
 function selectAprsStation(callsign, openTab = true) {
   const value = normalizeAprsCallsign(callsign);
   if (!value) return;
@@ -2154,7 +2158,10 @@ function clearAprsStation() {
 }
 
 document.querySelectorAll(".tab").forEach((button) => {
-  button.addEventListener("click", () => switchTab(button.dataset.tab));
+  button.addEventListener("click", () => {
+    switchTab(button.dataset.tab);
+    requestAnimationFrame(scrollToAppTop);
+  });
 });
 
 document.addEventListener("click", (event) => {
@@ -2180,9 +2187,7 @@ document.addEventListener("click", (event) => {
   if (tabButton) {
     switchTab(tabButton.dataset.openTab);
     if (tabButton.dataset.scrollTop === "true") {
-      requestAnimationFrame(() => {
-        window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
-      });
+      requestAnimationFrame(scrollToAppTop);
     }
   }
   if (event.target.closest("#copy-profile-summary")) copyProfileSummary();

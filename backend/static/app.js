@@ -13,6 +13,8 @@ const state = {
   latestAprs: [],
   aprsStatus: {},
   insights: {},
+  selectedAprsCallsign: "",
+  selectedAprsEvents: [],
   profileSummary: "",
   allTimeRecords: [],
   records: {
@@ -355,6 +357,69 @@ function aprsPacketLabels(event) {
   ].filter(Boolean);
 }
 
+function aprsCallsign(event) {
+  const metadata = aprsMetadata(event);
+  return String(event?.callsign || metadata.source_callsign || metadata.callsign || "").trim().toUpperCase();
+}
+
+function aprsCallsignButton(callsign, extraClass = "") {
+  const value = String(callsign || "").trim().toUpperCase();
+  if (!value) return "-";
+  return `<button class="callsign-button ${extraClass}" type="button" data-aprs-callsign="${esc(value)}">${esc(value)}</button>`;
+}
+
+function eventLineHtml(event) {
+  const line = eventLine(event);
+  if (event.event_type !== "aprs_packet") return esc(line);
+  const callsign = aprsCallsign(event);
+  if (!callsign) return esc(line);
+  return esc(line).replace(esc(callsign), aprsCallsignButton(callsign, "inline-callsign"));
+}
+
+function categoryKey(metadata) {
+  const category = String(metadata.heard_category || "").toLowerCase();
+  if (category === "direct_rf" || metadata.direct_rf_heard === true) return "direct_rf";
+  if (category === "digipeated_rf" || metadata.digipeated_rf_heard === true) return "digipeated_rf";
+  if (category === "aprs_is" || metadata.network_seen === true) return "aprs_is";
+  return "unknown";
+}
+
+function stationDetailDistance(metadata) {
+  const distance = aprsDistanceLabel(metadata);
+  if (!distance) return "";
+  const quality = aprsDistanceQualityLabel(metadata);
+  return quality ? `${distance} (${quality.toLowerCase()})` : distance;
+}
+
+function packetSnippet(event, metadata) {
+  const text = metadata.comment || metadata.payload || metadata.payload_text || event.raw_text || "";
+  const trimmed = String(text).replace(/\s+/g, " ").trim();
+  return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
+}
+
+function decodedNote(metadata) {
+  const decodedText = String(metadata.direwolf_decoded_text || "");
+  if (/mic-e/i.test(decodedText)) return "MIC-E decoded by Direwolf";
+  if (hasValue(metadata.decoded_lat) && hasValue(metadata.decoded_lon)) return "Position decoded by Direwolf";
+  return "";
+}
+
+function gateStatusLabel(metadata) {
+  if (metadata.confirmed_gated_by_me === true) return "Local gate confirmed by APRS-IS proof";
+  if (metadata.gated_by_other === true && metadata.gated_by) return `Gated by ${metadata.gated_by}`;
+  if (metadata.heard_over_rf === true && metadata.gate_eligible === true) return "Local gate unconfirmed";
+  if (metadata.gate_eligible === true) return "Gate eligible, unconfirmed";
+  return "No gate evidence";
+}
+
+function countStationValues(events, valueFn) {
+  return events.reduce((counts, event) => {
+    const value = valueFn(event);
+    if (value) counts[value] = (counts[value] || 0) + 1;
+    return counts;
+  }, {});
+}
+
 function uniqueAircraftEvents(adsb) {
   const byKey = new Map();
   adsb.forEach((event) => {
@@ -531,7 +596,7 @@ function renderFeed(events, targetId, limit = 20) {
     return `
       <div class="feed-row ${isNew || isRecent ? "new" : ""}">
         <time>${esc(relTime(event.timestamp))}</time>
-        <strong>${esc(eventLine(event))}</strong>
+        <strong>${eventLineHtml(event)}</strong>
         <span>${esc(event.event_type || "-")}</span>
         <p>${esc(eventDetail(event))}</p>
       </div>
@@ -630,7 +695,7 @@ function renderOverviewFeed(events, sources, targetId, limit = 20, insights = {}
     return `
       <div class="feed-row ${isNew || isRecent ? "new" : ""}">
         <time>${esc(relTime(event.timestamp))}</time>
-        <strong>${esc(eventLine(event))}</strong>
+        <strong>${eventLineHtml(event)}</strong>
         <span>${esc(event.event_type || "-")}</span>
         <p>${esc(eventDetail(event))}</p>
       </div>
@@ -668,18 +733,137 @@ function renderEvents(events, sources) {
   setText("dash-events-types", summarizeCounts(countBy(newest, (event) => event.event_type)));
   setText("dash-events-sources", summarizeCounts(countBy(newest, (event) => sourceTypeForEvent(event, sources))));
   setHtml("dash-events-lines", newest.slice(0, 10).map((event) => `
-    <div><time>${esc(relTime(event.timestamp))}</time><span>${esc(eventLine(event))}</span></div>
+    <div><time>${esc(relTime(event.timestamp))}</time><span>${eventLineHtml(event)}</span></div>
   `).join("") || "<p>No data yet</p>");
   renderFeed(newest, "event-feed", 20);
   renderFeed(eventsTabEvents, "events-tab-feed", 20);
   newest.forEach((event) => state.seenEvents.add(event.id));
 }
 
+function stationDetailMetric(label, value) {
+  return `<div><dt>${esc(label)}</dt><dd>${esc(value || "No data yet")}</dd></div>`;
+}
+
+function renderStationPacketRows(events) {
+  return events.slice(0, 6).map((event) => {
+    const metadata = aprsMetadata(event);
+    const labels = [
+      aprsCategoryLabel(metadata) || "Unknown",
+      aprsViaLabel(metadata),
+      stationDetailDistance(metadata),
+      aprsAudioLabel(metadata) ? `audio ${aprsAudioLabel(metadata)}` : "",
+    ].filter(Boolean);
+    return `
+      <div class="station-packet-row">
+        <time>${esc(fmtDateTime(event.timestamp))}</time>
+        <div>
+          <div>${labels.map((label) => `<span class="pill">${esc(label)}</span>`).join(" ")}</div>
+          <p>${esc(packetSnippet(event, metadata) || "No packet text stored")}</p>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderAprsStationDetail(events) {
+  const target = $("aprs-station-detail");
+  const subtitle = $("aprs-station-subtitle");
+  const selected = state.selectedAprsCallsign;
+  if (!target) return;
+  if (!selected) {
+    if (subtitle) subtitle.textContent = "Click a callsign to inspect how your station heard it.";
+    target.className = "aprs-station-detail empty";
+    target.innerHTML = "No APRS station selected.";
+    return;
+  }
+
+  const matching = events
+    .filter((event) => aprsCallsign(event) === selected)
+    .sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
+  if (matching.length) state.selectedAprsEvents = matching;
+  const stationEvents = matching.length ? matching : state.selectedAprsEvents;
+  const stale = !matching.length;
+  if (!stationEvents.length) {
+    if (subtitle) subtitle.textContent = selected;
+    target.className = "aprs-station-detail empty";
+    target.innerHTML = `No recent packets for ${esc(selected)} in the current sample.`;
+    return;
+  }
+
+  const enriched = stationEvents.map((event) => ({ event, metadata: aprsMetadata(event) }));
+  const latest = enriched[0];
+  const latestMetadata = latest.metadata;
+  const categoryCounts = countBy(enriched, (item) => categoryKey(item.metadata));
+  const viaCounts = countStationValues(stationEvents, (event) => {
+    const via = preferredHeardVia(aprsMetadata(event));
+    return via && via !== "direct" ? via : "";
+  });
+  const topVia = topEntries(viaCounts, 1)[0]?.[0] || (categoryCounts.direct_rf ? "direct" : "No data yet");
+  const distances = enriched
+    .map((item) => ({ metadata: item.metadata, miles: Number(item.metadata.distance_miles) }))
+    .filter((item) => Number.isFinite(item.miles) && String(item.metadata.distance_quality || "").toLowerCase() !== "questionable")
+    .sort((a, b) => b.miles - a.miles);
+  const farthest = distances[0]?.metadata;
+  const latestDistance = stationDetailDistance(latestMetadata);
+  const audioValues = enriched
+    .map((item) => ({ metadata: item.metadata, level: Number(item.metadata.audio_level) }))
+    .filter((item) => Number.isFinite(item.level))
+    .sort((a, b) => b.level - a.level);
+  const recentAudio = aprsAudioLabel(latestMetadata);
+  const bestAudio = audioValues[0] ? aprsAudioLabel(audioValues[0].metadata) : "";
+  const motion = aprsMotionLabels(latestMetadata).join(", ");
+  const note = decodedNote(latestMetadata);
+  const gate = gateStatusLabel(latestMetadata);
+  const categorySummary = [
+    `Direct RF ${categoryCounts.direct_rf || 0}`,
+    `Digipeated RF ${categoryCounts.digipeated_rf || 0}`,
+    `APRS-IS/network-side ${categoryCounts.aprs_is || 0}`,
+    `Unknown ${categoryCounts.unknown || 0}`,
+  ].join(" / ");
+
+  if (subtitle) {
+    subtitle.textContent = stale
+      ? `${selected} - no recent packets in the current sample; showing last known detail.`
+      : `${selected} - ${stationEvents.length} packet${stationEvents.length === 1 ? "" : "s"} in the current sample.`;
+  }
+  target.className = "aprs-station-detail";
+  target.innerHTML = `
+    ${stale ? `<p class="station-detail-note">No recent packets for this station in the current sample. Showing last known detail.</p>` : ""}
+    <div class="station-detail-top">
+      <div>
+        <span class="eyebrow">callsign</span>
+        <h3>${esc(selected)}</h3>
+      </div>
+      <div class="station-detail-badges">
+        <span class="pill">${esc(stationTypeLabel(latestMetadata.station_type || "station"))}</span>
+        <span class="pill">${esc(aprsCategoryLabel(latestMetadata) || "Unknown")}</span>
+        <span class="pill">${esc(gate)}</span>
+      </div>
+    </div>
+    <dl class="station-detail-grid">
+      ${stationDetailMetric("Last heard", relTime(latest.event.timestamp))}
+      ${stationDetailMetric("Heard summary", categorySummary)}
+      ${stationDetailMetric("Most recent distance", latestDistance)}
+      ${stationDetailMetric("Farthest non-questionable", farthest ? stationDetailDistance(farthest) : "")}
+      ${stationDetailMetric("Most common via", topVia)}
+      ${stationDetailMetric("Recent audio", recentAudio)}
+      ${stationDetailMetric("Best audio", bestAudio)}
+      ${stationDetailMetric("Decoded motion", motion)}
+      ${stationDetailMetric("Direwolf note", note)}
+      ${stationDetailMetric("Latest gate status", gate)}
+    </dl>
+    <section class="station-packet-list">
+      <h4>Recent packets</h4>
+      ${renderStationPacketRows(stationEvents)}
+    </section>
+  `;
+}
+
 function renderAprsTable(events) {
   const html = events.map((event) => `
     <tr class="${secondsAgo(event.timestamp) <= 30 ? "recent-row" : ""}">
       <td>${esc(fmtTime(event.timestamp))}</td>
-      <td>${esc(event.callsign || "-")}</td>
+      <td>${aprsCallsignButton(aprsCallsign(event))}</td>
       <td>
         <div>${aprsPacketLabels(event).map((label) => `<span class="pill">${esc(label)}</span>`).join(" ")}</div>
         <div class="mono">${esc(event.raw_text || "")}</div>
@@ -690,6 +874,7 @@ function renderAprsTable(events) {
   setHtml("aprs-tab-table", html || `<tr><td colspan="3">No APRS packets yet</td></tr>`);
   setText("aprs-tab-count", events.length);
   setHtml("events-aprs-table", state.eventFilters.aprs ? html : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
+  renderAprsStationDetail(events);
 }
 
 function fallbackText(value) {
@@ -778,7 +963,7 @@ function renderHourBars(targetId, events) {
   `).join(""));
 }
 
-function renderRankBars(targetId, entries) {
+function renderRankBars(targetId, entries, options = {}) {
   if (!entries.length) {
     setHtml(targetId, "No data yet");
     return;
@@ -786,7 +971,7 @@ function renderRankBars(targetId, entries) {
   const max = Math.max(...entries.map((entry) => entry[1]));
   setHtml(targetId, entries.map(([label, count]) => `
     <div class="rank-row">
-      <span>${esc(label)}</span>
+      <span>${options.callsign ? aprsCallsignButton(label, "inline-callsign") : esc(label)}</span>
       <div><i style="width:${Math.max(6, (count / max) * 100)}%"></i></div>
       <strong>${esc(count.toLocaleString())}</strong>
     </div>
@@ -806,7 +991,7 @@ function renderVisuals({ aprs, adsb, sources, insights, system }) {
     const via = preferredHeardVia(metadata);
     if (via && via !== "direct") digiCounts[via] = (digiCounts[via] || 0) + 1;
   });
-  renderRankBars("visual-aprs-digis", topEntries(digiCounts, 5));
+  renderRankBars("visual-aprs-digis", topEntries(digiCounts, 5), { callsign: true });
   renderRankBars("visual-station-types", topEntries(countBy(aprs.map(aprsMetadata), (metadata) => (
     metadata.station_type ? stationTypeLabel(metadata.station_type) : "Station"
   )), 5));
@@ -1425,6 +1610,23 @@ function switchTab(tabName) {
   if (tabName === "adsb") renderAdsbUi(state.adsbUi);
 }
 
+function selectAprsStation(callsign, openTab = true) {
+  const value = String(callsign || "").trim().toUpperCase();
+  if (!value) return;
+  state.selectedAprsCallsign = value;
+  state.selectedAprsEvents = state.latestAprs
+    .filter((event) => aprsCallsign(event) === value)
+    .sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
+  renderAprsStationDetail(state.latestAprs);
+  if (openTab) switchTab("aprs");
+}
+
+function clearAprsStation() {
+  state.selectedAprsCallsign = "";
+  state.selectedAprsEvents = [];
+  renderAprsStationDetail(state.latestAprs);
+}
+
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => switchTab(button.dataset.tab));
 });
@@ -1432,6 +1634,9 @@ document.querySelectorAll(".tab").forEach((button) => {
 document.addEventListener("click", (event) => {
   const tabButton = event.target.closest("[data-open-tab]");
   if (tabButton) switchTab(tabButton.dataset.openTab);
+  const aprsCallsign = event.target.closest("[data-aprs-callsign]");
+  if (aprsCallsign) selectAprsStation(aprsCallsign.dataset.aprsCallsign);
+  if (event.target.closest("#clear-aprs-station")) clearAprsStation();
   if (event.target.closest("#copy-profile-summary")) copyProfileSummary();
   const recordCard = event.target.closest("[data-record-type]");
   if (recordCard) showRecordModal(recordCard.dataset.recordType);

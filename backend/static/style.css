@@ -611,6 +611,94 @@ dd {
   color: var(--cyan);
 }
 
+.callsign-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--cyan);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.callsign-button:hover,
+.callsign-button:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.inline-callsign {
+  display: inline;
+}
+
+.aprs-station-panel {
+  margin-top: 1rem;
+}
+
+.aprs-station-detail.empty {
+  color: var(--muted);
+}
+
+.station-detail-note {
+  margin: 0 0 0.85rem;
+  color: var(--amber);
+  font-size: 0.86rem;
+}
+
+.station-detail-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.station-detail-top h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.45rem;
+}
+
+.station-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.station-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.station-detail-grid div {
+  min-width: 0;
+  border: 1px solid rgba(37, 50, 65, 0.78);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: rgba(11, 15, 20, 0.35);
+}
+
+.station-packet-list h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+}
+
+.station-packet-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid rgba(37, 50, 65, 0.7);
+}
+
+.station-packet-row p {
+  margin: 0.35rem 0 0;
+  color: #cfdeef;
+  overflow-wrap: anywhere;
+}
+
 #tab-adsb.active {
   margin: calc(clamp(1rem, 3vw, 2rem) * -1);
 }
@@ -1197,6 +1285,23 @@ tr.recent-row td {
 
   .visual-card-wide {
     grid-column: auto;
+  }
+
+  .station-detail-top,
+  .station-packet-row {
+    grid-template-columns: 1fr;
+  }
+
+  .station-detail-top {
+    display: grid;
+  }
+
+  .station-detail-badges {
+    justify-content: flex-start;
+  }
+
+  .station-detail-grid {
+    grid-template-columns: 1fr;
   }
 
   .donut-wrap {

@@ -637,52 +637,35 @@ dd {
 
 .station-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.45rem;
   padding: 1rem;
 }
 
 .station-row {
   display: grid;
-  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
-  gap: 0.85rem;
-  align-items: stretch;
+  grid-template-columns: minmax(8rem, 12rem) minmax(5.5rem, 7rem) minmax(6rem, 8rem) minmax(9rem, 1.2fr) minmax(8rem, 1fr) minmax(5rem, 7rem);
+  gap: 0.65rem;
+  align-items: center;
   border: 1px solid rgba(37, 50, 65, 0.78);
   border-radius: 8px;
-  padding: 0.85rem;
+  padding: 0.65rem 0.75rem;
   background: rgba(11, 15, 20, 0.35);
 }
 
 .station-row-main {
-  display: grid;
-  align-content: start;
-  gap: 0.25rem;
-}
-
-.station-row-main span {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 800;
-}
-
-.station-row dl {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.65rem;
-  margin: 0;
-}
-
-.station-row dl div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   min-width: 0;
 }
 
-.station-row dt {
+.station-row > span {
+  min-width: 0;
   color: var(--muted);
-  font-size: 0.74rem;
-}
-
-.station-row dd {
-  margin-top: 0.15rem;
   font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aprs-station-detail.empty {
@@ -1376,10 +1359,11 @@ tr.recent-row td {
 
   .station-row {
     grid-template-columns: 1fr;
+    gap: 0.35rem;
   }
 
-  .station-row dl {
-    grid-template-columns: 1fr;
+  .station-row > span {
+    white-space: normal;
   }
 
   .donut-wrap {

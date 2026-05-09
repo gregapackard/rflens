@@ -833,6 +833,19 @@ function stationSummary(events) {
   };
 }
 
+function stationCategorySummary(summary) {
+  const counts = summary.categoryCounts || {};
+  const active = ["direct_rf", "digipeated_rf", "aprs_is"]
+    .filter((key) => Number(counts[key]) > 0);
+  if (active.length > 1) return "Mixed";
+  if (active[0] === "direct_rf") return "Direct RF";
+  if (active[0] === "digipeated_rf") {
+    return summary.topVia ? `Digipeated RF via ${summary.topVia}` : "Digipeated RF";
+  }
+  if (active[0] === "aprs_is") return "Network-side";
+  return "Unknown";
+}
+
 function renderAprsStations(events) {
   const groups = {};
   events.forEach((event) => {
@@ -848,31 +861,18 @@ function renderAprsStations(events) {
   setText("aprs-tab-count", `${rows.length.toLocaleString()} stations`);
   setHtml("aprs-stations-list", rows.map(({ callsign, events: stationEvents, summary }) => {
     const metadata = summary.latestMetadata;
-    const categoryMix = [
-      `direct ${summary.categoryCounts.direct_rf || 0}`,
-      `digipeated ${summary.categoryCounts.digipeated_rf || 0}`,
-      `network ${summary.categoryCounts.aprs_is || 0}`,
-      `unknown ${summary.categoryCounts.unknown || 0}`,
-    ].join(" / ");
     const distance = summary.bestDistance ? stationDetailDistance(summary.bestDistance) : "";
-    const motion = aprsMotionLabels(metadata).join(", ");
-    const gate = gateStatusLabel(metadata);
+    const category = stationCategorySummary(summary);
     return `
       <article class="station-row">
         <div class="station-row-main">
           <strong>${aprsCallsignButton(callsign)}</strong>
-          <span>${esc(stationTypeLabel(metadata.station_type || "station"))}</span>
+          ${metadata.station_type ? `<span class="pill">${esc(stationTypeLabel(metadata.station_type))}</span>` : ""}
         </div>
-        <dl>
-          ${stationDetailMetric("Last heard", summary.latest ? relTime(summary.latest.timestamp) : "")}
-          ${stationDetailMetric("Packets", stationEvents.length.toLocaleString())}
-          ${stationDetailMetric("Heard mix", categoryMix)}
-          ${stationDetailMetric("Most common via", summary.topVia || (summary.categoryCounts.direct_rf ? "direct" : ""))}
-          ${stationDetailMetric("Best distance", distance)}
-          ${stationDetailMetric("Audio", summary.bestAudio)}
-          ${stationDetailMetric("Motion", motion)}
-          ${stationDetailMetric("Gate hint", gate)}
-        </dl>
+        <span>${esc(stationEvents.length.toLocaleString())} packet${stationEvents.length === 1 ? "" : "s"}</span>
+        <span>${esc(category)}</span>
+        <span>Last heard ${esc(summary.latest ? relTime(summary.latest.timestamp) : "No data yet")}</span>
+        <span>${esc(distance || "No distance")}</span>
       </article>
     `;
   }).join("") || "No APRS stations in the current sample yet.");

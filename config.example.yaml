@@ -1,10 +1,16 @@
+# Copy this file to config.yaml and edit it for your station.
+# Keep config.yaml private if it contains your exact location, callsign,
+# local paths, private URLs, or any other station-specific details.
+
 database_path: "./data/rflens.db"
 
 station:
-  name: "RF Node"
-  lat: 39.9612
-  lon: -82.9988
-  grid: "EN80"
+  name: "My Ham Station"
+  callsign: "N0CALL"
+  aprs_callsign: "N0CALL-10"
+  grid: "FN00"
+  lat: 40.0000
+  lon: -80.0000
 
 server:
   host: "0.0.0.0"
@@ -15,29 +21,43 @@ retention:
   aprs_events_days: 30
   satellite_events_days: 365
 
+system:
+  # Used by /api/system for disk space checks. If omitted, RFLens uses
+  # the database parent directory.
+  disk_path: "./data"
+
 adsb_ui:
-  enabled: true
-  url: "http://rfnode.local/tar1090/"
+  enabled: false
+  # Example: "http://rflens.local/tar1090/"
+  url: ""
 
 sources:
   aprs:
-    enabled: true
+    enabled: false
     name: "APRS Direwolf"
+    callsign: "N0CALL-10"
+    igate_callsign: "N0CALL-10"
     device_index: 0
     frequency: "144.390 MHz"
     log_path: "./data/direwolf.log"
+    direct_rf_questionable_miles: 300
+    digipeated_rf_questionable_miles: 700
 
   adsb:
-    enabled: true
+    enabled: false
     name: "ADS-B readsb"
     device_index: 1
     frequency: "1090 MHz"
     aircraft_json_path: "/run/readsb/aircraft.json"
     poll_seconds: 2
+    min_insert_seconds: 120
+    min_distance_nmi: 2
+    min_altitude_change_ft: 1000
+    min_range_change_nmi: 10
 
   satellite:
-    enabled: true
+    enabled: false
     name: "SatDump Captures"
     device_index: 2
     frequency: "137 MHz"
-    captures_path: "/home/rfnode/meteor/captures"
+    captures_path: "./data/captures"

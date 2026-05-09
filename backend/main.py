@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import load_config
+from .config import load_config, resolve_path
 from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_insights, fetch_records, init_db, insert_event
 from .models import EventIn
 from .system_stats import memory_stats_from_values, read_meminfo_memory
@@ -67,7 +67,10 @@ def adsb_ui() -> dict[str, object]:
 @app.get("/api/system")
 def system() -> dict[str, object]:
     cfg = load_config()
-    disk_path = Path(cfg.get("database_path", ".")).resolve().parent
+    system_cfg = cfg.get("system", {}) or {}
+    disk_path = resolve_path(system_cfg.get("disk_path") or cfg.get("database_path", "."))
+    if disk_path.suffix:
+        disk_path = disk_path.parent
     usage = shutil.disk_usage(disk_path if disk_path.exists() else Path.cwd())
     cpu_usage = None
     memory = None

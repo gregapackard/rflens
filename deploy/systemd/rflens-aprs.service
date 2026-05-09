@@ -1,12 +1,16 @@
 [Unit]
-Description=RF Lens APRS Direwolf log ingestor
-After=rflens-aprs-radio.service
-Requires=rflens-aprs-radio.service
+Description=RFLens APRS Direwolf log ingestor
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/rfnode/rflens
-ExecStart=/home/rfnode/rflens/venv/bin/python -m backend.ingestors.aprs_direwolf
+# This tails sources.aprs.log_path from config.yaml. Direwolf may be
+# managed separately or by an optional local radio pipeline service.
+User=rflens
+Group=rflens
+WorkingDirectory=/opt/rflens
+ExecStart=/opt/rflens/venv/bin/python -m backend.ingestors.aprs_direwolf
 Restart=always
 RestartSec=5
 

@@ -3,6 +3,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+if [ -f "venv/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source "venv/bin/activate"
+elif [ -f ".venv/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source ".venv/bin/activate"
+fi
+
 mkdir -p ./data/logs
 python -m scripts.init_db
 
@@ -30,7 +38,27 @@ start_bg() {
   nohup "$@" >> "$log" 2>&1 &
 }
 
-start_bg api uvicorn backend.main:app --host 0.0.0.0 --port 8080
+HOST="${RFLENS_HOST:-}"
+if [ -z "$HOST" ]; then
+  HOST="$(python - <<'PY'
+from backend.config import load_config
+cfg = load_config()
+print((cfg.get("server", {}) or {}).get("host") or "0.0.0.0")
+PY
+)"
+fi
+
+PORT="${RFLENS_PORT:-}"
+if [ -z "$PORT" ]; then
+  PORT="$(python - <<'PY'
+from backend.config import load_config
+cfg = load_config()
+print((cfg.get("server", {}) or {}).get("port") or 8080)
+PY
+)"
+fi
+
+start_bg api uvicorn backend.main:app --host "$HOST" --port "$PORT"
 
 if [ "$(is_enabled aprs)" = "yes" ]; then
   start_bg aprs python -m backend.ingestors.aprs_direwolf
@@ -44,5 +72,5 @@ if [ "$(is_enabled satellite)" = "yes" ]; then
   start_bg satellite python -m backend.ingestors.satdump_watcher
 fi
 
-echo "RF Lens is running on the configured host, for example http://rflens:8080/ui"
+echo "RFLens is running on ${HOST}:${PORT}; open http://localhost:${PORT}/ui or your node hostname."
 echo "Logs are in ./data/logs/"

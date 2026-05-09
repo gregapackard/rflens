@@ -10,14 +10,18 @@ sudo install -m 0644 "${SCRIPT_DIR}/systemd/rflens-aprs-radio.service" "${UNIT_D
 sudo install -m 0644 "${SCRIPT_DIR}/systemd/rflens-aprs.service" "${UNIT_DIR}/rflens-aprs.service"
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now rflens-api rflens-adsb rflens-aprs-radio rflens-aprs
+sudo systemctl enable --now rflens-api
 
 cat <<'EOF'
-RF Lens systemd services installed.
+RFLens systemd service templates installed.
 
 Enabled now:
   rflens-api
-  rflens-adsb
-  rflens-aprs-radio
-  rflens-aprs
+
+Optional sources:
+  sudo systemctl enable --now rflens-aprs
+  sudo systemctl enable --now rflens-adsb
+  sudo systemctl enable --now rflens-aprs-radio
+
+Enable only the sources configured for this station.
 EOF

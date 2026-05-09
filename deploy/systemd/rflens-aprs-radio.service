@@ -1,14 +1,16 @@
 [Unit]
-Description=RF Lens APRS radio pipeline
+Description=RFLens optional APRS radio pipeline
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=rfnode
-Group=rfnode
-WorkingDirectory=/home/rfnode/rflens
-ExecStart=/bin/bash -lc 'set -o pipefail; rtl_fm -d APRS001 -f 144.390M -M fm -s 22050 -g 49 - | direwolf -c /home/rfnode/aprs/direwolf.conf -r 22050 -t 0 - 2>&1 | tee -a /home/rfnode/rflens/data/direwolf.log'
+# Optional example for stations that want systemd to run rtl_fm + Direwolf.
+# Edit the SDR device, gain, Direwolf config path, and log path before use.
+User=rflens
+Group=rflens
+WorkingDirectory=/opt/rflens
+ExecStart=/bin/bash -lc 'set -o pipefail; rtl_fm -d 0 -f 144.390M -M fm -s 22050 -g 40 - | direwolf -c /etc/direwolf.conf -r 22050 -t 0 - 2>&1 | tee -a /opt/rflens/data/direwolf.log'
 Restart=always
 RestartSec=5
 

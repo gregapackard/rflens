@@ -1,12 +1,15 @@
 [Unit]
-Description=RF Lens API
+Description=RFLens API
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/rfnode/rflens
-ExecStart=/home/rfnode/rflens/venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8080
+# Edit User and WorkingDirectory for your install.
+User=rflens
+Group=rflens
+WorkingDirectory=/opt/rflens
+ExecStart=/bin/bash /opt/rflens/scripts/run_api.sh
 Restart=always
 RestartSec=5
 

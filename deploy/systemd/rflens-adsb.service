@@ -1,12 +1,15 @@
 [Unit]
-Description=RF Lens ADS-B ingestor
+Description=RFLens ADS-B readsb ingestor
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/rfnode/rflens
-ExecStart=/home/rfnode/rflens/venv/bin/python -m backend.ingestors.adsb_readsb
+# Edit User, WorkingDirectory, and ExecStart for your install.
+User=rflens
+Group=rflens
+WorkingDirectory=/opt/rflens
+ExecStart=/opt/rflens/venv/bin/python -m backend.ingestors.adsb_readsb
 Restart=always
 RestartSec=5
 

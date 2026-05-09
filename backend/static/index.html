@@ -374,7 +374,17 @@
               <h2>APRS Stations Heard</h2>
               <p>One row per station from the current APRS sample. Click a callsign for packet detail.</p>
             </div>
-            <span id="aprs-tab-count">0</span>
+            <div class="panel-actions">
+              <label class="sort-control">Sort
+                <select id="aprs-station-sort">
+                  <option value="packet_count_desc">Most packets</option>
+                  <option value="last_heard_desc">Last heard</option>
+                  <option value="distance_desc">Distance</option>
+                  <option value="callsign_asc">Callsign</option>
+                </select>
+              </label>
+              <span id="aprs-tab-count">0</span>
+            </div>
           </div>
           <div class="station-list" id="aprs-stations-list">No APRS stations yet.</div>
         </article>

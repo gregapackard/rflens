@@ -16,6 +16,7 @@ const state = {
   selectedAprsCallsign: "",
   selectedAprsEvents: [],
   selectedAprsEventsByCallsign: {},
+  aprsStationSort: "packet_count_desc",
   profileSummary: "",
   allTimeRecords: [],
   records: {
@@ -846,6 +847,28 @@ function stationCategorySummary(summary) {
   return "Unknown";
 }
 
+function sortAprsStationRows(rows) {
+  const byLastHeard = (a, b) => timeMs(b.summary.latest?.timestamp) - timeMs(a.summary.latest?.timestamp);
+  const byPackets = (a, b) => (b.events.length - a.events.length) || byLastHeard(a, b);
+  const byDistance = (a, b) => {
+    const aMiles = Number(a.summary.bestDistance?.distance_miles);
+    const bMiles = Number(b.summary.bestDistance?.distance_miles);
+    const aHas = Number.isFinite(aMiles);
+    const bHas = Number.isFinite(bMiles);
+    if (aHas && bHas && bMiles !== aMiles) return bMiles - aMiles;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return byLastHeard(a, b);
+  };
+  const byCallsign = (a, b) => a.callsign.localeCompare(b.callsign) || byLastHeard(a, b);
+  const sorters = {
+    packet_count_desc: byPackets,
+    last_heard_desc: byLastHeard,
+    distance_desc: byDistance,
+    callsign_asc: byCallsign,
+  };
+  return rows.sort(sorters[state.aprsStationSort] || byPackets);
+}
+
 function renderAprsStations(events) {
   const groups = {};
   events.forEach((event) => {
@@ -854,9 +877,8 @@ function renderAprsStations(events) {
     if (!groups[callsign]) groups[callsign] = [];
     groups[callsign].push(event);
   });
-  const rows = Object.entries(groups)
-    .map(([callsign, stationEvents]) => ({ callsign, events: stationEvents, summary: stationSummary(stationEvents) }))
-    .sort((a, b) => timeMs(b.summary.latest?.timestamp) - timeMs(a.summary.latest?.timestamp));
+  const rows = sortAprsStationRows(Object.entries(groups)
+    .map(([callsign, stationEvents]) => ({ callsign, events: stationEvents, summary: stationSummary(stationEvents) })));
 
   setText("aprs-tab-count", `${rows.length.toLocaleString()} stations`);
   setHtml("aprs-stations-list", rows.map(({ callsign, events: stationEvents, summary }) => {
@@ -864,15 +886,13 @@ function renderAprsStations(events) {
     const distance = summary.bestDistance ? stationDetailDistance(summary.bestDistance) : "";
     const category = stationCategorySummary(summary);
     return `
-      <article class="station-row">
-        <div class="station-row-main">
-          <strong>${aprsCallsignButton(callsign)}</strong>
+      <article class="station-row" role="button" tabindex="0" data-aprs-callsign="${esc(callsign)}" aria-label="Show APRS station detail for ${esc(callsign)}">
+        <div class="station-row-top">
+          <strong>${esc(callsign)}</strong>
           ${metadata.station_type ? `<span class="pill">${esc(stationTypeLabel(metadata.station_type))}</span>` : ""}
+          <span class="pill">${esc(stationEvents.length.toLocaleString())} packet${stationEvents.length === 1 ? "" : "s"}</span>
         </div>
-        <span>${esc(stationEvents.length.toLocaleString())} packet${stationEvents.length === 1 ? "" : "s"}</span>
-        <span>${esc(category)}</span>
-        <span>Last heard ${esc(summary.latest ? relTime(summary.latest.timestamp) : "No data yet")}</span>
-        <span>${esc(distance || "No distance")}</span>
+        <p>${esc(category)} · ${esc(distance || "No distance")} · last heard ${esc(summary.latest ? relTime(summary.latest.timestamp) : "No data yet")}</p>
       </article>
     `;
   }).join("") || "No APRS stations in the current sample yet.");
@@ -1802,7 +1822,20 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeRecordModal();
+  if ((event.key === "Enter" || event.key === " ") && event.target.matches?.("[data-aprs-callsign]")) {
+    event.preventDefault();
+    selectAprsStation(event.target.dataset.aprsCallsign);
+  }
 });
+
+const aprsStationSort = $("aprs-station-sort");
+if (aprsStationSort) {
+  aprsStationSort.value = state.aprsStationSort;
+  aprsStationSort.addEventListener("change", () => {
+    state.aprsStationSort = aprsStationSort.value || "packet_count_desc";
+    renderAprsStations(state.latestAprs);
+  });
+}
 
 function syncEventFilterControls() {
   document.querySelectorAll("[data-event-filter]").forEach((input) => {

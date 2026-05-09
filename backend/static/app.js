@@ -729,12 +729,66 @@ function renderOverviewFeed(events, sources, targetId, limit = 20, insights = {}
   return filtered.length || highlightLines.length;
 }
 
+function notableTimelineItems(events, insights = {}) {
+  const daily = insights?.daily || {};
+  const items = [];
+  const add = (type, title, detail, time = "today") => {
+    if (detail) items.push({ type, title, detail, time });
+  };
+
+  (Array.isArray(insights.summary) ? insights.summary : []).slice(0, 3).forEach((line) => {
+    add("insight", "RFLens insight", line);
+  });
+  (insights.aprs?.plain_english || []).slice(0, 4).forEach((line) => {
+    add("aprs", "APRS observation", line);
+  });
+  add("aprs", "Farthest direct APRS", daily.farthest_direct_rf_today);
+  add("aprs", "Farthest digipeated APRS", daily.farthest_digipeated_rf_today);
+  add("aprs", "APRS gate notice", daily.gate_notice_today || insights.aprs?.gate?.notice);
+  (insights.adsb?.plain_english || []).slice(0, 3).forEach((line) => {
+    add("adsb", "ADS-B observation", line);
+  });
+  add("adsb", "ADS-B max range", daily.adsb_max_range_today);
+  add("adsb", "ADS-B highest aircraft", daily.adsb_highest_altitude_today);
+  add("adsb", "ADS-B strongest signal", daily.adsb_strongest_signal_today);
+
+  events
+    .filter((event) => !["aprs_packet", "adsb_aircraft"].includes(event.event_type))
+    .slice(0, 8)
+    .forEach((event) => {
+      const type = eventFilterType(event, state.latestSources);
+      add(type, eventLine(event), eventDetail(event), relTime(event.timestamp));
+    });
+  return items.slice(0, 18);
+}
+
+function renderNotableTimeline(events, insights = {}) {
+  const items = notableTimelineItems(events, insights);
+  setText("events-tab-count", `${items.length.toLocaleString()} notable`);
+  setHtml("events-tab-feed", items.map((item) => `
+    <div class="feed-row notable ${esc(item.type)}">
+      <time>${esc(item.time)}</time>
+      <strong>${esc(item.title)}</strong>
+      <span>${esc(item.type)}</span>
+      <p>${esc(item.detail)}</p>
+    </div>
+  `).join("") || `
+    <div class="feed-row">
+      <time>today</time>
+      <strong>No notable station events yet</strong>
+      <span>timeline</span>
+      <p>RFLens will surface APRS, ADS-B, service, and capture observations here.</p>
+    </div>
+  `);
+  return items.length;
+}
+
 function renderEvents(events, sources) {
   const newest = events.slice().sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
   const eventsTabEvents = newest.filter((event) => eventFilterEnabled(event, sources));
   const recent = newest.filter((event) => secondsAgo(event.timestamp) <= RECENT_SECONDS);
   setText("event-count", newest.length);
-  setText("events-tab-count", eventsTabEvents.length);
+  renderNotableTimeline(newest, state.insights);
   setText("overview-events-count", renderOverviewFeed(newest, sources, "overview-event-feed", 20));
   setText("dash-events-recent", newest.length ? `${recent.length} events` : "No data yet");
   setText("dash-events-types", summarizeCounts(countBy(newest, (event) => event.event_type)));
@@ -743,12 +797,85 @@ function renderEvents(events, sources) {
     <div><time>${esc(relTime(event.timestamp))}</time><span>${eventLineHtml(event)}</span></div>
   `).join("") || "<p>No data yet</p>");
   renderFeed(newest, "event-feed", 20);
-  renderFeed(eventsTabEvents, "events-tab-feed", 20);
+  renderFeed(eventsTabEvents, "events-raw-feed", 30);
   newest.forEach((event) => state.seenEvents.add(event.id));
 }
 
 function stationDetailMetric(label, value) {
   return `<div><dt>${esc(label)}</dt><dd>${esc(value || "No data yet")}</dd></div>`;
+}
+
+function stationSummary(events) {
+  const enriched = events.map((event) => ({ event, metadata: aprsMetadata(event) }));
+  const latest = enriched.slice().sort((a, b) => timeMs(b.event.timestamp) - timeMs(a.event.timestamp))[0];
+  const categoryCounts = countBy(enriched, (item) => categoryKey(item.metadata));
+  const viaCounts = countStationValues(events, (event) => {
+    const via = preferredHeardVia(aprsMetadata(event));
+    return via && via !== "direct" ? via : "";
+  });
+  const bestDistance = enriched
+    .map((item) => ({ metadata: item.metadata, miles: Number(item.metadata.distance_miles) }))
+    .filter((item) => Number.isFinite(item.miles) && String(item.metadata.distance_quality || "").toLowerCase() !== "questionable")
+    .sort((a, b) => b.miles - a.miles)[0]?.metadata;
+  const audioValues = enriched
+    .map((item) => ({ metadata: item.metadata, level: Number(item.metadata.audio_level) }))
+    .filter((item) => Number.isFinite(item.level))
+    .sort((a, b) => b.level - a.level);
+  const topCategory = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "unknown";
+  return {
+    latest: latest?.event,
+    latestMetadata: latest?.metadata || {},
+    categoryCounts,
+    topCategory,
+    topVia: topEntries(viaCounts, 1)[0]?.[0] || "",
+    bestDistance,
+    bestAudio: audioValues[0] ? aprsAudioLabel(audioValues[0].metadata) : "",
+  };
+}
+
+function renderAprsStations(events) {
+  const groups = {};
+  events.forEach((event) => {
+    const callsign = aprsCallsign(event);
+    if (!callsign) return;
+    if (!groups[callsign]) groups[callsign] = [];
+    groups[callsign].push(event);
+  });
+  const rows = Object.entries(groups)
+    .map(([callsign, stationEvents]) => ({ callsign, events: stationEvents, summary: stationSummary(stationEvents) }))
+    .sort((a, b) => timeMs(b.summary.latest?.timestamp) - timeMs(a.summary.latest?.timestamp));
+
+  setText("aprs-tab-count", `${rows.length.toLocaleString()} stations`);
+  setHtml("aprs-stations-list", rows.map(({ callsign, events: stationEvents, summary }) => {
+    const metadata = summary.latestMetadata;
+    const categoryMix = [
+      `direct ${summary.categoryCounts.direct_rf || 0}`,
+      `digipeated ${summary.categoryCounts.digipeated_rf || 0}`,
+      `network ${summary.categoryCounts.aprs_is || 0}`,
+      `unknown ${summary.categoryCounts.unknown || 0}`,
+    ].join(" / ");
+    const distance = summary.bestDistance ? stationDetailDistance(summary.bestDistance) : "";
+    const motion = aprsMotionLabels(metadata).join(", ");
+    const gate = gateStatusLabel(metadata);
+    return `
+      <article class="station-row">
+        <div class="station-row-main">
+          <strong>${aprsCallsignButton(callsign)}</strong>
+          <span>${esc(stationTypeLabel(metadata.station_type || "station"))}</span>
+        </div>
+        <dl>
+          ${stationDetailMetric("Last heard", summary.latest ? relTime(summary.latest.timestamp) : "")}
+          ${stationDetailMetric("Packets", stationEvents.length.toLocaleString())}
+          ${stationDetailMetric("Heard mix", categoryMix)}
+          ${stationDetailMetric("Most common via", summary.topVia || (summary.categoryCounts.direct_rf ? "direct" : ""))}
+          ${stationDetailMetric("Best distance", distance)}
+          ${stationDetailMetric("Audio", summary.bestAudio)}
+          ${stationDetailMetric("Motion", motion)}
+          ${stationDetailMetric("Gate hint", gate)}
+        </dl>
+      </article>
+    `;
+  }).join("") || "No APRS stations in the current sample yet.");
 }
 
 function renderStationPacketRows(events) {
@@ -871,6 +998,7 @@ function renderAprsStationDetail(events = state.latestAprs) {
 }
 
 function renderAprsTable(events) {
+  renderAprsStations(events);
   const html = events.map((event) => `
     <tr class="${secondsAgo(event.timestamp) <= 30 ? "recent-row" : ""}">
       <td>${esc(fmtTime(event.timestamp))}</td>
@@ -883,7 +1011,6 @@ function renderAprsTable(events) {
   `).join("");
   setHtml("aprs-table", html);
   setHtml("aprs-tab-table", html || `<tr><td colspan="3">No APRS packets yet</td></tr>`);
-  setText("aprs-tab-count", events.length);
   setHtml("events-aprs-table", state.eventFilters.aprs ? html : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
   renderAprsStationDetail(events);
 }

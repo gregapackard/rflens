@@ -371,11 +371,25 @@
         <article class="panel">
           <div class="panel-head">
             <div>
-              <h2>APRS Detail</h2>
-              <p>Recent RF, digipeated, and network-side APRS observations.</p>
+              <h2>APRS Stations Heard</h2>
+              <p>One row per station from the current APRS sample. Click a callsign for packet detail.</p>
             </div>
             <span id="aprs-tab-count">0</span>
           </div>
+          <div class="station-list" id="aprs-stations-list">No APRS stations yet.</div>
+        </article>
+        <article class="panel aprs-station-panel" id="aprs-station-panel" tabindex="-1">
+          <div class="panel-head">
+            <div>
+              <h2>APRS Station Detail</h2>
+              <p id="aprs-station-subtitle">Click a callsign to inspect how your station heard it.</p>
+            </div>
+            <button class="secondary-button compact-button" type="button" id="clear-aprs-station">Clear station</button>
+          </div>
+          <div id="aprs-station-detail" class="aprs-station-detail empty">No APRS station selected.</div>
+        </article>
+        <details class="advanced-panel">
+          <summary>Advanced: Recent Raw APRS Packets</summary>
           <div class="table-wrap">
             <table>
               <thead>
@@ -388,17 +402,7 @@
               <tbody id="aprs-tab-table"></tbody>
             </table>
           </div>
-        </article>
-        <article class="panel aprs-station-panel" id="aprs-station-panel" tabindex="-1">
-          <div class="panel-head">
-            <div>
-              <h2>APRS Station Detail</h2>
-              <p id="aprs-station-subtitle">Click a callsign to inspect how your station heard it.</p>
-            </div>
-            <button class="secondary-button compact-button" type="button" id="clear-aprs-station">Clear station</button>
-          </div>
-          <div id="aprs-station-detail" class="aprs-station-detail empty">No APRS station selected.</div>
-        </article>
+        </details>
       </section>
 
       <section class="tab-panel" id="tab-profile">
@@ -489,12 +493,19 @@
       </section>
 
       <section class="tab-panel" id="tab-events">
-        <section class="layout">
-          <article class="panel feed-panel">
-            <div class="panel-head">
-              <h2>Station Timeline</h2>
-              <span id="events-tab-count">0</span>
+        <article class="panel feed-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Notable Station Timeline</h2>
+              <p>Concise APRS, ADS-B, service, and capture observations. Raw high-frequency updates stay out of the main timeline.</p>
             </div>
+            <span id="events-tab-count">0</span>
+          </div>
+          <div class="feed notable-feed" id="events-tab-feed"></div>
+        </article>
+
+        <details class="advanced-panel">
+          <summary>Advanced: Recent Raw Records</summary>
             <div class="event-filters" aria-label="Events tab filters">
               <label><input type="checkbox" data-event-filter="adsb"> ADS-B</label>
               <label><input type="checkbox" data-event-filter="aprs" checked> APRS</label>
@@ -502,8 +513,7 @@
               <label><input type="checkbox" data-event-filter="system" checked> System</label>
               <button class="secondary-button compact-button" type="button" id="events-show-all">Show all</button>
             </div>
-            <div class="feed" id="events-tab-feed"></div>
-          </article>
+            <div class="feed" id="events-raw-feed"></div>
 
           <article class="panel">
             <div class="panel-head">
@@ -524,7 +534,6 @@
               </table>
             </div>
           </article>
-        </section>
 
         <article class="panel">
           <div class="panel-head">
@@ -543,6 +552,7 @@
             </table>
           </div>
         </article>
+        </details>
       </section>
 
       <section class="tab-panel" id="tab-captures">

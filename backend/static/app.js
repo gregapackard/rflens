@@ -15,6 +15,7 @@ const state = {
   insights: {},
   selectedAprsCallsign: "",
   selectedAprsEvents: [],
+  selectedAprsEventsByCallsign: {},
   profileSummary: "",
   allTimeRecords: [],
   records: {
@@ -359,11 +360,17 @@ function aprsPacketLabels(event) {
 
 function aprsCallsign(event) {
   const metadata = aprsMetadata(event);
-  return String(event?.callsign || metadata.source_callsign || metadata.callsign || "").trim().toUpperCase();
+  return normalizeAprsCallsign(event?.callsign || metadata.source_callsign || metadata.callsign || "");
+}
+
+function normalizeAprsCallsign(value) {
+  const text = String(value || "").trim().toUpperCase().replace(/\*$/, "");
+  const match = text.match(/[A-Z0-9]{1,6}(?:-\d{1,2})?/);
+  return match ? match[0] : "";
 }
 
 function aprsCallsignButton(callsign, extraClass = "") {
-  const value = String(callsign || "").trim().toUpperCase();
+  const value = normalizeAprsCallsign(callsign);
   if (!value) return "-";
   return `<button class="callsign-button ${extraClass}" type="button" data-aprs-callsign="${esc(value)}">${esc(value)}</button>`;
 }
@@ -765,7 +772,7 @@ function renderStationPacketRows(events) {
   }).join("");
 }
 
-function renderAprsStationDetail(events) {
+function renderAprsStationDetail(events = state.latestAprs) {
   const target = $("aprs-station-detail");
   const subtitle = $("aprs-station-subtitle");
   const selected = state.selectedAprsCallsign;
@@ -780,13 +787,17 @@ function renderAprsStationDetail(events) {
   const matching = events
     .filter((event) => aprsCallsign(event) === selected)
     .sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
-  if (matching.length) state.selectedAprsEvents = matching;
-  const stationEvents = matching.length ? matching : state.selectedAprsEvents;
+  if (matching.length) {
+    state.selectedAprsEventsByCallsign[selected] = matching;
+    state.selectedAprsEvents = matching;
+  }
+  const lastKnown = state.selectedAprsEventsByCallsign[selected] || [];
+  const stationEvents = matching.length ? matching : lastKnown;
   const stale = !matching.length;
   if (!stationEvents.length) {
     if (subtitle) subtitle.textContent = selected;
     target.className = "aprs-station-detail empty";
-    target.innerHTML = `No recent packets for ${esc(selected)} in the current sample.`;
+    target.innerHTML = `No recent packets for this station in the current APRS sample.`;
     return;
   }
 
@@ -828,7 +839,7 @@ function renderAprsStationDetail(events) {
   }
   target.className = "aprs-station-detail";
   target.innerHTML = `
-    ${stale ? `<p class="station-detail-note">No recent packets for this station in the current sample. Showing last known detail.</p>` : ""}
+    ${stale ? `<p class="station-detail-note">No recent packets for this station in the current APRS sample. Showing last known detail.</p>` : ""}
     <div class="station-detail-top">
       <div>
         <span class="eyebrow">callsign</span>
@@ -1611,14 +1622,23 @@ function switchTab(tabName) {
 }
 
 function selectAprsStation(callsign, openTab = true) {
-  const value = String(callsign || "").trim().toUpperCase();
+  const value = normalizeAprsCallsign(callsign);
   if (!value) return;
   state.selectedAprsCallsign = value;
-  state.selectedAprsEvents = state.latestAprs
+  const matching = state.latestAprs
     .filter((event) => aprsCallsign(event) === value)
     .sort((a, b) => timeMs(b.timestamp) - timeMs(a.timestamp));
+  state.selectedAprsEvents = matching;
+  if (matching.length) state.selectedAprsEventsByCallsign[value] = matching;
   renderAprsStationDetail(state.latestAprs);
-  if (openTab) switchTab("aprs");
+  if (openTab) {
+    switchTab("aprs");
+    requestAnimationFrame(() => {
+      const panel = $("aprs-station-panel");
+      panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+      panel?.focus?.();
+    });
+  }
 }
 
 function clearAprsStation() {
@@ -1632,11 +1652,20 @@ document.querySelectorAll(".tab").forEach((button) => {
 });
 
 document.addEventListener("click", (event) => {
+  const aprsCallsign = event.target.closest("[data-aprs-callsign]");
+  if (aprsCallsign) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectAprsStation(aprsCallsign.dataset.aprsCallsign);
+    return;
+  }
+  if (event.target.closest("#clear-aprs-station")) {
+    event.preventDefault();
+    clearAprsStation();
+    return;
+  }
   const tabButton = event.target.closest("[data-open-tab]");
   if (tabButton) switchTab(tabButton.dataset.openTab);
-  const aprsCallsign = event.target.closest("[data-aprs-callsign]");
-  if (aprsCallsign) selectAprsStation(aprsCallsign.dataset.aprsCallsign);
-  if (event.target.closest("#clear-aprs-station")) clearAprsStation();
   if (event.target.closest("#copy-profile-summary")) copyProfileSummary();
   const recordCard = event.target.closest("[data-record-type]");
   if (recordCard) showRecordModal(recordCard.dataset.recordType);

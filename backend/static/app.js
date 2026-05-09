@@ -231,6 +231,51 @@ function aircraftLabel(event) {
   return event.callsign || metadata.flight || metadata.hex || metadata.icao || event.id || "Unknown";
 }
 
+const ADSB_OPERATOR_NAMES = {
+  AAL: "American",
+  ASA: "Alaska",
+  DAL: "Delta",
+  EDV: "Endeavor",
+  ENY: "Envoy",
+  FDX: "FedEx",
+  FFT: "Frontier",
+  JBU: "JetBlue",
+  JIA: "PSA",
+  NKS: "Spirit",
+  PDT: "Piedmont",
+  RPA: "Republic",
+  SKW: "SkyWest",
+  SWA: "Southwest",
+  UAL: "United",
+  UPS: "UPS",
+};
+
+function adsbFlightCallsign(event) {
+  const metadata = parseMetadata(event);
+  return String(event.callsign || metadata.flight || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function adsbOperatorPrefix(event) {
+  const flight = adsbFlightCallsign(event);
+  const match = flight.match(/^([A-Z]{2,4})(?=\d)/);
+  return match ? match[1] : "";
+}
+
+function adsbOperatorName(prefix) {
+  if (!prefix) return "Unknown operator";
+  return ADSB_OPERATOR_NAMES[prefix] || prefix;
+}
+
+function adsbOperatorLabel(prefix) {
+  if (!prefix) return "Unknown operator";
+  const name = adsbOperatorName(prefix);
+  return name === prefix ? prefix : `${name} (${prefix})`;
+}
+
+function adsbCountLabel(count, singular = "record") {
+  return `${count.toLocaleString()} ${singular}${count === 1 ? "" : "s"}`;
+}
+
 function titleCase(value) {
   return String(value || "")
     .replace(/_/g, " ")
@@ -564,10 +609,11 @@ function eventFilterEnabled(event, sources) {
 }
 
 function renderHealthOnline(online) {
-  state.healthOnline = online;
+  state.healthOnline = Boolean(online);
   $("health").textContent = online ? "online" : "offline";
-  $("health").className = `pulse ${online ? "online" : "offline"}`;
+  $("health").className = `pulse health-pill ${online ? "online" : "offline"}`;
   setText("dash-global-health", online ? "Online" : "Offline");
+  renderHeaderStatus();
 }
 
 function compactStatusSourceLabel(source) {
@@ -580,22 +626,31 @@ function compactStatusSourceLabel(source) {
 }
 
 function renderHeaderStatus(sources = state.latestSources, system = state.latestSystem) {
-  const target = $("header-status-pills");
-  if (!target) return;
+  const serviceTarget = $("header-service-pills");
+  const resourceTarget = $("header-resource-pills");
+  const health = $("health");
+  if (!serviceTarget || !resourceTarget) return;
   const wanted = ["aprs", "adsb", "satellite"];
   const byType = Object.fromEntries((sources || []).map((source) => [source.type, source]));
-  const pills = [];
+  const orderedSources = [
+    ...wanted.map((type) => byType[type]).filter(Boolean),
+    ...(sources || []).filter((source) => source?.type && !wanted.includes(source.type)),
+  ];
+  const seen = new Set();
+  const servicePills = [];
+  const resourcePills = [];
 
-  wanted.forEach((type) => {
-    const source = byType[type];
-    if (!source) return;
+  orderedSources.forEach((source) => {
+    const key = String(source.id ?? source.type ?? source.name ?? "");
+    if (!key || seen.has(key)) return;
+    seen.add(key);
     const status = sourceStatus(source);
-    const online = status === "online";
     const label = compactStatusSourceLabel(source);
     if (!label || /^(unknown|null|undefined)$/i.test(status)) return;
-    pills.push({
+    servicePills.push({
       className: statusClass(status),
-      text: `${label} ${online ? "online" : status}`,
+      label,
+      status,
     });
   });
 
@@ -606,16 +661,24 @@ function renderHeaderStatus(sources = state.latestSources, system = state.latest
   ].forEach(([label, value]) => {
     const number = Number(value);
     if (Number.isFinite(number)) {
-      pills.push({
+      resourcePills.push({
         className: number > 85 ? "warn" : "ok",
         text: `${label} ${number.toFixed(0)}%`,
       });
     }
   });
 
-  target.innerHTML = pills.map((pill) => (
-    `<span class="status-pill ${esc(pill.className)}">${esc(pill.text)}</span>`
+  serviceTarget.innerHTML = servicePills.map((pill) => (
+    `<span class="service-dot-pill ${esc(pill.className)}" title="${esc(pill.label)} ${esc(pill.status)}"><span>${esc(pill.label)}</span><i aria-hidden="true"></i></span>`
   )).join("");
+  resourceTarget.innerHTML = resourcePills.map((pill) => (
+    `<span class="resource-pill ${esc(pill.className)}">${esc(pill.text)}</span>`
+  )).join("");
+
+  if (health) {
+    const hasDetailedStatus = servicePills.length || resourcePills.length;
+    health.classList.toggle("fallback-hidden", Boolean(hasDetailedStatus && state.healthOnline));
+  }
 }
 
 async function pollHealth() {
@@ -1109,13 +1172,95 @@ function fallbackText(value) {
   return hasValue(value) ? value : "No data yet";
 }
 
-function renderInsights(insights = {}) {
-  const summary = Array.isArray(insights.summary) ? insights.summary : [];
-  setHtml("insights-summary", (summary.length ? summary : ["RFLens is waiting for fresh station observations."]).slice(0, 6).map((line) => `
-    <article class="insight-card">
-      <p>${esc(line)}</p>
+function cleanBriefingValue(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text && !/^(no data yet|unknown|null|undefined|nan)$/i.test(text) ? text : "";
+}
+
+function briefingCard(category, title, detail = "") {
+  return `
+    <article class="briefing-card">
+      <span>${esc(category)}</span>
+      <strong>${esc(title)}</strong>
+      ${detail ? `<p>${esc(detail)}</p>` : ""}
     </article>
-  `).join(""));
+  `;
+}
+
+function resourceSummary(system) {
+  return systemHealthItems(system)
+    .map(([label, value]) => `${label === "Memory" ? "Mem" : label} ${value}`)
+    .join(", ");
+}
+
+function serviceSummary(sources) {
+  const tracked = (sources || []).filter((source) => source?.type);
+  if (!tracked.length) return "";
+  const online = tracked.filter((source) => sourceStatus(source) === "online").length;
+  return `${online}/${tracked.length} source${tracked.length === 1 ? "" : "s"} online`;
+}
+
+function renderBriefing({ insights = {}, adsb = [], sources = [], system = {}, aprsStatus = {} }) {
+  const daily = insights.daily || {};
+  const operator = topAdsbOperators(adsb, 1)[0];
+  const serviceText = serviceSummary(sources);
+  const resources = resourceSummary(system);
+  const aprsPackets = cleanBriefingValue(daily.aprs_packets_heard_today);
+  const aprsStations = cleanBriefingValue(daily.unique_aprs_stations_heard_today);
+  const direct = cleanBriefingValue(daily.direct_rf_heard_today);
+  const digipeated = cleanBriefingValue(daily.digipeated_rf_heard_today);
+  const farthestDirect = cleanBriefingValue(daily.farthest_direct_rf_today);
+  const farthestDigipeated = cleanBriefingValue(daily.farthest_digipeated_rf_today);
+  const adsbRange = cleanBriefingValue(daily.adsb_max_range_today);
+  const adsbAltitude = cleanBriefingValue(daily.adsb_highest_altitude_today);
+  const adsbSignal = cleanBriefingValue(daily.adsb_strongest_signal_today);
+  const confirmedGate = Number(daily.confirmed_gated_by_kf8gbu_10_today ?? daily.gate_confirmed_today);
+  const gateNotice = cleanBriefingValue(daily.gate_notice_today || insights.aprs?.gate?.notice);
+  const cards = [];
+
+  cards.push(briefingCard(
+    "Station",
+    serviceText || "Waiting for source status",
+    resources || "Resource status will appear after the next system refresh.",
+  ));
+
+  cards.push(briefingCard(
+    "APRS",
+    aprsPackets && aprsStations
+      ? `Heard ${aprsPackets} APRS packets from ${aprsStations} stations today.`
+      : "Waiting for APRS station activity.",
+    [direct ? `Direct RF ${direct}` : "", digipeated ? `digipeated RF ${digipeated}` : ""].filter(Boolean).join("; "),
+  ));
+
+  cards.push(briefingCard(
+    "ADS-B",
+    adsbRange ? `ADS-B max range today: ${adsbRange}.` : `${uniqueAircraftEvents(adsb).length.toLocaleString()} aircraft in the current ADS-B sample.`,
+    [
+      operator ? `Top operator: ${operator[0]} (${adsbCountLabel(operator[1], "record")})` : "",
+      adsbAltitude ? `highest ${adsbAltitude}` : "",
+      adsbSignal ? `strongest ${adsbSignal}` : "",
+    ].filter(Boolean).join("; "),
+  ));
+
+  cards.push(briefingCard(
+    "iGate",
+    Number.isFinite(confirmedGate) && confirmedGate > 0
+      ? `${confirmedGate.toLocaleString()} packet${confirmedGate === 1 ? "" : "s"} confirmed gated by local station today.`
+      : `No APRS-IS proof yet that ${aprsStatus.callsign || "this station"} gated a packet today.`,
+    gateNotice,
+  ));
+
+  cards.push(briefingCard(
+    "Range",
+    farthestDigipeated ? `Farthest digipeated APRS: ${farthestDigipeated}.` : (farthestDirect ? `Farthest direct APRS: ${farthestDirect}.` : "Waiting for APRS range records."),
+    farthestDirect && farthestDigipeated ? `Farthest direct APRS: ${farthestDirect}.` : "",
+  ));
+
+  setHtml("insights-summary", cards.join(""));
+}
+
+function renderInsights(insights = {}, adsb = [], sources = [], system = {}, aprsStatus = {}) {
+  renderBriefing({ insights, adsb, sources, system, aprsStatus });
 
   const daily = insights.daily || {};
   setText("insights-daily-aprs-packets", fallbackText(daily.aprs_packets_heard_today));
@@ -1132,9 +1277,12 @@ function renderInsights(insights = {}) {
   setText("insights-daily-adsb-signal", fallbackText(daily.adsb_strongest_signal_today));
 
   const aprsLines = insights.aprs?.plain_english || [];
-  const adsbLines = insights.adsb?.plain_english || [];
+  const adsbLines = [
+    ...adsbObservationLines(adsb, insights),
+    ...(insights.adsb?.plain_english || []),
+  ];
   setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 4).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No APRS insights yet.</p>");
-  setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 5).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No ADS-B insights yet.</p>");
+  setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 6).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No ADS-B receiver insights yet.</p>");
 }
 
 function renderDonut(targetId, values) {
@@ -1198,33 +1346,65 @@ function renderRankBars(targetId, entries, options = {}) {
   `).join(""));
 }
 
-function renderRangeBuckets(targetId, adsb) {
-  const buckets = [
-    { label: "0-25", min: 0, max: 25, count: 0 },
-    { label: "25-50", min: 25, max: 50, count: 0 },
-    { label: "50-100", min: 50, max: 100, count: 0 },
-    { label: "100-150", min: 100, max: 150, count: 0 },
-    { label: "150-200", min: 150, max: 200, count: 0 },
-    { label: "200+", min: 200, max: Infinity, count: 0 },
-  ];
-  uniqueAircraftEvents(adsb).forEach((event) => {
-    const range = adsbRange(event);
-    if (!Number.isFinite(range)) return;
-    const bucket = buckets.find((item) => range >= item.min && range < item.max);
+function bucketEvents(events, buckets, valueFn) {
+  const rows = buckets.map((bucket) => ({ ...bucket, count: 0 }));
+  events.forEach((event) => {
+    const value = valueFn(event);
+    if (!Number.isFinite(value)) return;
+    const bucket = rows.find((item) => value >= item.min && value < item.max);
     if (bucket) bucket.count += 1;
   });
+  return rows;
+}
+
+function renderBucketRows(targetId, buckets, emptyText) {
   const max = Math.max(...buckets.map((bucket) => bucket.count));
   if (!max) {
-    setHtml(targetId, "No ranged aircraft in the current ADS-B sample yet.");
+    setHtml(targetId, emptyText);
     return;
   }
   setHtml(targetId, buckets.map((bucket) => `
     <div class="range-row">
-      <span>${esc(bucket.label)} nmi</span>
+      <span>${esc(bucket.label)}</span>
       <div><i style="width:${Math.max(6, (bucket.count / max) * 100)}%"></i></div>
       <strong>${esc(bucket.count.toLocaleString())}</strong>
     </div>
   `).join(""));
+}
+
+function adsbRangeBuckets(adsb) {
+  return bucketEvents(uniqueAircraftEvents(adsb), [
+    { label: "0-25 nmi", min: 0, max: 25 },
+    { label: "25-50 nmi", min: 25, max: 50 },
+    { label: "50-100 nmi", min: 50, max: 100 },
+    { label: "100-150 nmi", min: 100, max: 150 },
+    { label: "150-200 nmi", min: 150, max: 200 },
+    { label: "200+ nmi", min: 200, max: Infinity },
+  ], adsbRange);
+}
+
+function adsbAltitudeBuckets(adsb) {
+  return bucketEvents(uniqueAircraftEvents(adsb), [
+    { label: "<10k ft", min: -Infinity, max: 10000 },
+    { label: "10-25k ft", min: 10000, max: 25000 },
+    { label: "25-40k ft", min: 25000, max: 40000 },
+    { label: "40k+ ft", min: 40000, max: Infinity },
+  ], adsbAltitude);
+}
+
+function renderRangeBuckets(targetId, adsb) {
+  renderBucketRows(targetId, adsbRangeBuckets(adsb), "No ranged aircraft in the current ADS-B sample yet.");
+}
+
+function renderAltitudeBuckets(targetId, adsb) {
+  renderBucketRows(targetId, adsbAltitudeBuckets(adsb), "No aircraft altitudes in the current ADS-B sample yet.");
+}
+
+function topBucketLabel(buckets) {
+  const top = buckets
+    .filter((bucket) => bucket.count > 0)
+    .sort((a, b) => b.count - a.count)[0];
+  return top ? top.label : "";
 }
 
 function currentFarthestAircraft(adsb) {
@@ -1233,6 +1413,47 @@ function currentFarthestAircraft(adsb) {
     .filter((item) => Number.isFinite(item.range))
     .sort((a, b) => b.range - a.range);
   return ranges[0] || null;
+}
+
+function topAdsbOperators(adsb, limit = 5) {
+  const counts = {};
+  adsb.forEach((event) => {
+    const prefix = adsbOperatorPrefix(event);
+    const key = prefix || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([prefix, count]) => [prefix === "unknown" ? "Unknown operator" : adsbOperatorLabel(prefix), count]);
+}
+
+function topAdsbAircraft(adsb, limit = 5) {
+  const counts = countBy(adsb, (event) => aircraftLabel(event));
+  return topEntries(counts, limit).filter(([, count]) => count > 1);
+}
+
+function adsbObservationLines(adsb, insights = {}) {
+  const daily = insights?.daily || {};
+  const operators = topAdsbOperators(adsb, 1);
+  const aircraft = topAdsbAircraft(adsb, 1);
+  const topRange = topBucketLabel(adsbRangeBuckets(adsb));
+  const topAltitude = topBucketLabel(adsbAltitudeBuckets(adsb));
+  const lines = [];
+  if (operators.length) {
+    const [operator, count] = operators[0];
+    lines.push(`Most common operator in sample: ${operator}, ${adsbCountLabel(count, "aircraft record")}.`);
+  }
+  if (aircraft.length) {
+    const [label, count] = aircraft[0];
+    lines.push(`Most frequent aircraft identifier in sample: ${label}, ${adsbCountLabel(count, "record")}.`);
+  }
+  if (topRange) lines.push(`Most aircraft with range data are in the ${topRange} bucket.`);
+  if (topAltitude) lines.push(`Most aircraft with altitude data are in the ${topAltitude} bucket.`);
+  if (hasValue(daily.adsb_highest_altitude_today)) lines.push(`Highest aircraft today: ${daily.adsb_highest_altitude_today}.`);
+  if (hasValue(daily.adsb_strongest_signal_today)) lines.push(`Strongest ADS-B signal today: ${daily.adsb_strongest_signal_today}.`);
+  lines.push("Open tar1090 for full aircraft map and aircraft-level detail.");
+  return lines;
 }
 
 function renderAdsbReceiverSummary(adsb, insights = {}) {
@@ -1247,6 +1468,9 @@ function renderAdsbReceiverSummary(adsb, insights = {}) {
     ["Farthest now", farthest ? `${aircraftLabel(farthest.event)}, ${farthest.range.toFixed(1)} nmi` : "No data yet"],
   ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("");
   setHtml("adsb-receiver-summary", html);
+  renderRankBars("adsb-receiver-operators", topAdsbOperators(adsb, 5));
+  renderRangeBuckets("adsb-receiver-ranges", adsb);
+  renderAltitudeBuckets("adsb-receiver-altitudes", adsb);
 }
 
 function renderVisuals({ aprs, adsb, sources, insights, system }) {
@@ -1276,6 +1500,8 @@ function renderVisuals({ aprs, adsb, sources, insights, system }) {
     ["Farthest now", farthest ? `${aircraftLabel(farthest.event)}, ${farthest.range.toFixed(1)} nmi` : "No data yet"],
   ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join(""));
   renderRangeBuckets("visual-adsb-ranges", adsb);
+  renderAltitudeBuckets("visual-adsb-altitudes", adsb);
+  renderRankBars("visual-adsb-operators", topAdsbOperators(adsb, 5));
   renderAdsbReceiverSummary(adsb, insights);
   setHtml("visual-services", stationHealthCards(sources, system));
 }
@@ -1790,7 +2016,7 @@ function renderRecordsAndAlerts({ sources, adsb, aprs, captures, system }) {
 
 function renderOverview({ sources, adsb, aprs, aprsStatus, captures, events, system, records, insights }) {
   renderGlobalCard({ sources });
-  renderInsights(insights);
+  renderInsights(insights, adsb, sources, system, aprsStatus);
   renderAdsbCard(adsb);
   renderAprsCard(aprs, aprsStatus);
   renderSatelliteCard(captures, events);
@@ -1936,7 +2162,14 @@ document.addEventListener("click", (event) => {
     return;
   }
   const tabButton = event.target.closest("[data-open-tab]");
-  if (tabButton) switchTab(tabButton.dataset.openTab);
+  if (tabButton) {
+    switchTab(tabButton.dataset.openTab);
+    if (tabButton.dataset.scrollTop === "true") {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      });
+    }
+  }
   if (event.target.closest("#copy-profile-summary")) copyProfileSummary();
   const recordCard = event.target.closest("[data-record-type]");
   if (recordCard) showRecordModal(recordCard.dataset.recordType);

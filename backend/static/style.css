@@ -106,40 +106,54 @@ time,
   max-width: min(50rem, 58vw);
 }
 
-.header-status-pills {
+.header-service-pills,
+.header-resource-pills {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.35rem;
 }
 
-.status-pill {
+.header-resource-pills {
+  padding-left: 0.55rem;
+  border-left: 1px solid rgba(37, 50, 65, 0.95);
+}
+
+.service-dot-pill,
+.resource-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 1.7rem;
-  border: 1px solid rgba(37, 50, 65, 0.95);
-  border-radius: 999px;
-  padding: 0.25rem 0.55rem;
-  background: rgba(17, 24, 33, 0.72);
   color: var(--muted);
   font-size: 0.74rem;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.status-pill.ok {
-  border-color: rgba(97, 230, 164, 0.32);
-  color: var(--green);
+.service-dot-pill {
+  flex-direction: row-reverse;
+  gap: 0.32rem;
 }
 
-.status-pill.warn,
-.status-pill.idle {
-  border-color: rgba(255, 209, 102, 0.35);
-  color: var(--amber);
+.service-dot-pill i {
+  width: 0.48rem;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.12);
 }
 
-.status-pill.bad {
-  border-color: rgba(255, 107, 107, 0.38);
+.service-dot-pill.ok i {
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(97, 230, 164, 0.12);
+}
+
+.service-dot-pill.bad i {
+  background: var(--red);
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.12);
+}
+
+.resource-pill.warn,
+.resource-pill.bad {
   color: var(--red);
 }
 
@@ -161,6 +175,10 @@ time,
 .pulse.offline {
   color: var(--red);
   border-color: rgba(255, 107, 107, 0.45);
+}
+
+.health-pill.fallback-hidden {
+  display: none;
 }
 
 .tabs {
@@ -337,6 +355,42 @@ dd {
   flex-wrap: wrap;
   gap: 0.55rem;
   justify-content: flex-end;
+}
+
+.briefing-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.briefing-card {
+  display: grid;
+  align-content: start;
+  gap: 0.38rem;
+  min-width: 0;
+  border: 1px solid rgba(85, 214, 255, 0.22);
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: rgba(85, 214, 255, 0.06);
+}
+
+.briefing-card span {
+  color: var(--cyan);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.briefing-card strong {
+  color: #e7f2ff;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.briefing-card p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .insight-card-grid {
@@ -913,6 +967,25 @@ dd {
   font-size: 0.86rem;
 }
 
+.adsb-receiver-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.adsb-receiver-breakdown section {
+  min-width: 0;
+  border: 1px solid rgba(37, 50, 65, 0.78);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: rgba(11, 15, 20, 0.35);
+}
+
+.adsb-receiver-breakdown h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+}
+
 .adsb-ui-wrap {
   position: relative;
   min-height: calc(100vh - 12.75rem);
@@ -1472,9 +1545,11 @@ tr.recent-row td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .briefing-grid,
   .insight-card-grid,
   .insight-columns,
   .visual-grid,
+  .adsb-receiver-breakdown,
   .metric-strip,
   .service-strip,
   .station-profile-grid,
@@ -1528,10 +1603,16 @@ tr.recent-row td {
     max-width: 100%;
   }
 
-  .header-status-pills {
+  .header-service-pills,
+  .header-resource-pills {
     justify-content: flex-start;
     max-height: 1.8rem;
     overflow: hidden;
+  }
+
+  .header-resource-pills {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .tabs {

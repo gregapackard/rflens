@@ -9,14 +9,15 @@
   <body>
     <header class="topbar">
       <div>
-        <h1><button class="brand-home" type="button" data-open-tab="dashboard" aria-label="Open Dashboard">RFLens</button></h1>
+        <h1><button class="brand-home" type="button" data-open-tab="dashboard" data-scroll-top="true" aria-label="Open Dashboard">RFLens</button></h1>
         <p class="tagline">See what your station hears.</p>
         <p class="subline">APRS, ADS-B, and station health for your local RF node.</p>
         <p id="station">RF Node</p>
       </div>
       <div class="topbar-status">
-        <div class="header-status-pills" id="header-status-pills" aria-label="Station service and system status"></div>
-        <div class="pulse" id="health">connecting</div>
+        <div class="header-service-pills" id="header-service-pills" aria-label="Source status"></div>
+        <div class="header-resource-pills" id="header-resource-pills" aria-label="System resource status"></div>
+        <div class="pulse health-pill" id="health">connecting</div>
       </div>
     </header>
 
@@ -193,16 +194,16 @@
           <section class="insights-panel" aria-label="RFLens Insights">
             <div class="insights-head">
               <div>
-                <h2>RFLens Insights</h2>
-                <p>Plain-English observations from APRS packets, ADS-B aircraft, and station health.</p>
+                <h2>RFLens Briefing</h2>
+                <p>Quick-read station context from APRS, ADS-B, and local system health.</p>
               </div>
               <div class="insights-actions">
                 <button class="secondary-button compact-button" type="button" data-open-tab="events">Raw Events</button>
                 <button class="secondary-button compact-button" type="button" data-open-tab="adsb">ADS-B Map</button>
               </div>
             </div>
-            <div class="insight-card-grid" id="insights-summary">
-              <article class="insight-card"><p>Waiting for RF observations.</p></article>
+            <div class="briefing-grid" id="insights-summary">
+              <article class="briefing-card"><h3>Station</h3><p>Waiting for RF observations.</p></article>
             </div>
             <div class="insight-columns">
               <section class="insight-column">
@@ -223,13 +224,13 @@
                 </dl>
               </section>
               <section class="insight-column">
-                <h3>APRS Observations</h3>
+                <h3>APRS Station Observations</h3>
                 <div class="insight-list" id="insights-aprs-list">
                   <p>No APRS insights yet.</p>
                 </div>
               </section>
               <section class="insight-column">
-                <h3>ADS-B Observations</h3>
+                <h3>ADS-B Receiver Observations</h3>
                 <div class="insight-list" id="insights-adsb-list">
                   <p>No ADS-B insights yet.</p>
                 </div>
@@ -265,6 +266,14 @@
               <section class="visual-card visual-card-wide">
                 <h3>ADS-B Range Buckets</h3>
                 <div id="visual-adsb-ranges" class="range-bars">No data yet</div>
+              </section>
+              <section class="visual-card visual-card-wide">
+                <h3>ADS-B Altitude Buckets</h3>
+                <div id="visual-adsb-altitudes" class="range-bars">No data yet</div>
+              </section>
+              <section class="visual-card visual-card-wide">
+                <h3>Top ADS-B Operators</h3>
+                <div id="visual-adsb-operators" class="rank-bars">No data yet</div>
               </section>
               <section class="visual-card visual-card-wide">
                 <h3>Station Services</h3>
@@ -492,6 +501,20 @@
           </div>
           <section class="adsb-receiver-summary">
             <div id="adsb-receiver-summary" class="metric-strip">No ADS-B receiver data yet.</div>
+            <div class="adsb-receiver-breakdown">
+              <section>
+                <h3>Top Operators</h3>
+                <div id="adsb-receiver-operators" class="rank-bars">No data yet</div>
+              </section>
+              <section>
+                <h3>Range Buckets</h3>
+                <div id="adsb-receiver-ranges" class="range-bars">No data yet</div>
+              </section>
+              <section>
+                <h3>Altitude Buckets</h3>
+                <div id="adsb-receiver-altitudes" class="range-bars">No data yet</div>
+              </section>
+            </div>
             <p>Open tar1090 for full aircraft map and aircraft-level detail.</p>
           </section>
           <div class="adsb-ui-wrap" id="adsb-ui-wrap">

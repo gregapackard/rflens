@@ -9,6 +9,7 @@ const state = {
   eventFilters: { adsb: false, aprs: true, satellite: true, system: true },
   latestEvents: [],
   latestSources: [],
+  latestSystem: {},
   latestAdsb: [],
   latestAprs: [],
   aprsStatus: {},
@@ -569,6 +570,54 @@ function renderHealthOnline(online) {
   setText("dash-global-health", online ? "Online" : "Offline");
 }
 
+function compactStatusSourceLabel(source) {
+  const name = String(source?.name || source?.type || "").toLowerCase();
+  if (name.includes("satdump")) return "SatDump";
+  if (source?.type === "satellite") return "Satellite";
+  if (source?.type === "adsb") return "ADS-B";
+  if (source?.type === "aprs") return "APRS";
+  return titleCase(source?.type || source?.name || "");
+}
+
+function renderHeaderStatus(sources = state.latestSources, system = state.latestSystem) {
+  const target = $("header-status-pills");
+  if (!target) return;
+  const wanted = ["aprs", "adsb", "satellite"];
+  const byType = Object.fromEntries((sources || []).map((source) => [source.type, source]));
+  const pills = [];
+
+  wanted.forEach((type) => {
+    const source = byType[type];
+    if (!source) return;
+    const status = sourceStatus(source);
+    const online = status === "online";
+    const label = compactStatusSourceLabel(source);
+    if (!label || /^(unknown|null|undefined)$/i.test(status)) return;
+    pills.push({
+      className: statusClass(status),
+      text: `${label} ${online ? "online" : status}`,
+    });
+  });
+
+  [
+    ["CPU", system?.cpu_percent],
+    ["Mem", system?.memory?.percent],
+    ["Disk", system?.disk?.percent],
+  ].forEach(([label, value]) => {
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      pills.push({
+        className: number > 85 ? "warn" : "ok",
+        text: `${label} ${number.toFixed(0)}%`,
+      });
+    }
+  });
+
+  target.innerHTML = pills.map((pill) => (
+    `<span class="status-pill ${esc(pill.className)}">${esc(pill.text)}</span>`
+  )).join("");
+}
+
 async function pollHealth() {
   try {
     const health = await getJson("/api/health");
@@ -1073,26 +1122,18 @@ function renderInsights(insights = {}) {
   setText("insights-daily-aprs-stations", fallbackText(daily.unique_aprs_stations_heard_today));
   setText("insights-daily-direct-rf", fallbackText(daily.direct_rf_heard_today));
   setText("insights-daily-digipeated-rf", fallbackText(daily.digipeated_rf_heard_today));
-  setText("insights-daily-network-seen", fallbackText(daily.network_seen_today));
   setText("insights-daily-farthest-direct", fallbackText(daily.farthest_direct_rf_today));
   setText("insights-daily-farthest-digipeated", fallbackText(daily.farthest_digipeated_rf_today));
-  setText("insights-daily-farthest-any-rf", fallbackText(daily.farthest_any_rf_today));
-  setText("insights-daily-farthest-network", fallbackText(daily.farthest_network_seen_today));
-  setText("insights-daily-aprs-audio", fallbackText(daily.best_aprs_audio_today));
-  setText("insights-daily-aprs-digi", fallbackText(daily.most_common_digipeater_path_today));
-  setText("insights-daily-gate-eligible", fallbackText(daily.gate_eligible_today));
-  setText("insights-daily-gate-confirmed", fallbackText(daily.gate_confirmed_today));
   setText("insights-daily-gate-me", fallbackText(daily.confirmed_gated_by_kf8gbu_10_today));
   setText("insights-daily-gate-unconfirmed", fallbackText(daily.gate_unconfirmed_today));
   setText("insights-daily-gate-notice", fallbackText(daily.gate_notice_today || insights.aprs?.gate?.notice));
-  setText("insights-daily-gate-competition", fallbackText(daily.gate_competition_note_today));
   setText("insights-daily-adsb-range", fallbackText(daily.adsb_max_range_today));
   setText("insights-daily-adsb-altitude", fallbackText(daily.adsb_highest_altitude_today));
   setText("insights-daily-adsb-signal", fallbackText(daily.adsb_strongest_signal_today));
 
   const aprsLines = insights.aprs?.plain_english || [];
   const adsbLines = insights.adsb?.plain_english || [];
-  setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 8).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No APRS insights yet.</p>");
+  setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 4).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No APRS insights yet.</p>");
   setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 5).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No ADS-B insights yet.</p>");
 }
 
@@ -1157,6 +1198,57 @@ function renderRankBars(targetId, entries, options = {}) {
   `).join(""));
 }
 
+function renderRangeBuckets(targetId, adsb) {
+  const buckets = [
+    { label: "0-25", min: 0, max: 25, count: 0 },
+    { label: "25-50", min: 25, max: 50, count: 0 },
+    { label: "50-100", min: 50, max: 100, count: 0 },
+    { label: "100-150", min: 100, max: 150, count: 0 },
+    { label: "150-200", min: 150, max: 200, count: 0 },
+    { label: "200+", min: 200, max: Infinity, count: 0 },
+  ];
+  uniqueAircraftEvents(adsb).forEach((event) => {
+    const range = adsbRange(event);
+    if (!Number.isFinite(range)) return;
+    const bucket = buckets.find((item) => range >= item.min && range < item.max);
+    if (bucket) bucket.count += 1;
+  });
+  const max = Math.max(...buckets.map((bucket) => bucket.count));
+  if (!max) {
+    setHtml(targetId, "No ranged aircraft in the current ADS-B sample yet.");
+    return;
+  }
+  setHtml(targetId, buckets.map((bucket) => `
+    <div class="range-row">
+      <span>${esc(bucket.label)} nmi</span>
+      <div><i style="width:${Math.max(6, (bucket.count / max) * 100)}%"></i></div>
+      <strong>${esc(bucket.count.toLocaleString())}</strong>
+    </div>
+  `).join(""));
+}
+
+function currentFarthestAircraft(adsb) {
+  const ranges = uniqueAircraftEvents(adsb)
+    .map((event) => ({ event, range: adsbRange(event) }))
+    .filter((item) => Number.isFinite(item.range))
+    .sort((a, b) => b.range - a.range);
+  return ranges[0] || null;
+}
+
+function renderAdsbReceiverSummary(adsb, insights = {}) {
+  const daily = insights?.daily || {};
+  const aircraft = uniqueAircraftEvents(adsb);
+  const farthest = currentFarthestAircraft(adsb);
+  const html = [
+    ["Aircraft sample", aircraft.length ? aircraft.length.toLocaleString() : "No data yet"],
+    ["Max range today", fallbackText(daily.adsb_max_range_today)],
+    ["Highest today", fallbackText(daily.adsb_highest_altitude_today)],
+    ["Strongest signal", fallbackText(daily.adsb_strongest_signal_today)],
+    ["Farthest now", farthest ? `${aircraftLabel(farthest.event)}, ${farthest.range.toFixed(1)} nmi` : "No data yet"],
+  ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("");
+  setHtml("adsb-receiver-summary", html);
+}
+
 function renderVisuals({ aprs, adsb, sources, insights, system }) {
   const daily = insights?.daily || {};
   renderDonut("visual-aprs-categories", [
@@ -1175,12 +1267,16 @@ function renderVisuals({ aprs, adsb, sources, insights, system }) {
     metadata.station_type ? stationTypeLabel(metadata.station_type) : "Station"
   )), 5));
   const aircraft = uniqueAircraftEvents(adsb);
+  const farthest = currentFarthestAircraft(adsb);
   setHtml("visual-adsb-summary", [
     ["Aircraft sample", aircraft.length ? aircraft.length.toLocaleString() : "No data yet"],
     ["Max range today", fallbackText(daily.adsb_max_range_today)],
     ["Highest today", fallbackText(daily.adsb_highest_altitude_today)],
     ["Strongest signal", fallbackText(daily.adsb_strongest_signal_today)],
+    ["Farthest now", farthest ? `${aircraftLabel(farthest.event)}, ${farthest.range.toFixed(1)} nmi` : "No data yet"],
   ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join(""));
+  renderRangeBuckets("visual-adsb-ranges", adsb);
+  renderAdsbReceiverSummary(adsb, insights);
   setHtml("visual-services", stationHealthCards(sources, system));
 }
 
@@ -1234,7 +1330,7 @@ function renderAdsbCard(adsb) {
   const maxRange = ranges.length ? Math.max(...ranges.map((item) => item.range)) : null;
   const closest = ranges.length ? ranges.slice().sort((a, b) => a.range - b.range)[0] : null;
   const highest = aircraft
-    .map((event) => Number(event.altitude))
+    .map(adsbAltitude)
     .filter(Number.isFinite)
     .sort((a, b) => b - a)[0];
   const bestRssi = aircraft
@@ -1384,6 +1480,7 @@ function renderSystemCard(system, sources) {
   setMany(["dash-system-adsb", "overview-system-adsb"], sourceText("adsb"));
   setMany(["dash-system-satellite", "overview-system-satellite"], sourceText("satellite"));
   setMany(["dash-system-warnings", "overview-system-warnings"], warnings.length);
+  renderHeaderStatus(sources, system);
 }
 
 function stationLocationLabel(station) {
@@ -1933,6 +2030,7 @@ async function refreshData() {
     state.adsbUi = adsbUi || { enabled: false, url: "" };
     state.latestEvents = events;
     state.latestSources = sources;
+    state.latestSystem = system || {};
     state.latestAdsb = adsb;
     state.latestAprs = aprs;
     state.aprsStatus = aprsStatus || {};

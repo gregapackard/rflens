@@ -40,6 +40,27 @@ body {
   backdrop-filter: blur(16px);
 }
 
+.brand-home {
+  display: inline-flex;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.brand-home:hover,
+.brand-home:focus-visible {
+  color: var(--cyan);
+}
+
+.brand-home:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid rgba(85, 214, 255, 0.65);
+  outline-offset: 0.2rem;
+}
+
 h1,
 h2,
 p {
@@ -75,6 +96,51 @@ time,
 .topbar #station {
   margin-top: 0.2rem;
   font-size: 0.82rem;
+}
+
+.topbar-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  max-width: min(50rem, 58vw);
+}
+
+.header-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7rem;
+  border: 1px solid rgba(37, 50, 65, 0.95);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(17, 24, 33, 0.72);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.status-pill.ok {
+  border-color: rgba(97, 230, 164, 0.32);
+  color: var(--green);
+}
+
+.status-pill.warn,
+.status-pill.idle {
+  border-color: rgba(255, 209, 102, 0.35);
+  color: var(--amber);
+}
+
+.status-pill.bad {
+  border-color: rgba(255, 107, 107, 0.38);
+  color: var(--red);
 }
 
 .pulse {
@@ -449,29 +515,47 @@ dd {
   gap: 0.55rem;
 }
 
-.rank-row {
+.rank-row,
+.range-row {
   grid-template-columns: minmax(5rem, 9rem) minmax(0, 1fr) 2.5rem;
   font-size: 0.82rem;
 }
 
-.rank-row div {
+.rank-row div,
+.range-row div {
   overflow: hidden;
   height: 0.55rem;
   border-radius: 999px;
   background: rgba(85, 214, 255, 0.12);
 }
 
-.rank-row i {
+.rank-row i,
+.range-row i {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--green);
 }
 
+.range-bars {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.range-row {
+  display: grid;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.range-row i {
+  background: var(--cyan);
+}
+
 .metric-strip,
 .service-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
   gap: 0.65rem;
 }
 
@@ -814,6 +898,19 @@ dd {
 
 .adsb-ui-panel {
   overflow: hidden;
+}
+
+.adsb-receiver-summary {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(8, 14, 20, 0.42);
+}
+
+.adsb-receiver-summary p {
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .adsb-ui-wrap {
@@ -1420,10 +1517,25 @@ tr.recent-row td {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+    gap: 0.65rem;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .topbar-status {
+    align-items: flex-start;
+    flex-direction: column-reverse;
+    max-width: 100%;
+  }
+
+  .header-status-pills {
+    justify-content: flex-start;
+    max-height: 1.8rem;
+    overflow: hidden;
   }
 
   .tabs {
-    top: 7.4rem;
+    top: 8.8rem;
   }
 
   .insights-head {

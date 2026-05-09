@@ -9,12 +9,15 @@
   <body>
     <header class="topbar">
       <div>
-        <h1>RFLens</h1>
+        <h1><button class="brand-home" type="button" data-open-tab="dashboard" aria-label="Open Dashboard">RFLens</button></h1>
         <p class="tagline">See what your station hears.</p>
         <p class="subline">APRS, ADS-B, and station health for your local RF node.</p>
         <p id="station">RF Node</p>
       </div>
-      <div class="pulse" id="health">connecting</div>
+      <div class="topbar-status">
+        <div class="header-status-pills" id="header-status-pills" aria-label="Station service and system status"></div>
+        <div class="pulse" id="health">connecting</div>
+      </div>
     </header>
 
     <nav class="tabs" aria-label="RFLens views">
@@ -209,19 +212,11 @@
                   <div><dt>Unique APRS stations</dt><dd id="insights-daily-aprs-stations">No data yet</dd></div>
                   <div><dt>Direct RF heard</dt><dd id="insights-daily-direct-rf">No data yet</dd></div>
                   <div><dt>Digipeated RF heard</dt><dd id="insights-daily-digipeated-rf">No data yet</dd></div>
-                  <div><dt>Network seen</dt><dd id="insights-daily-network-seen">No data yet</dd></div>
                   <div><dt>Farthest direct</dt><dd id="insights-daily-farthest-direct">No data yet</dd></div>
                   <div><dt>Farthest digipeated</dt><dd id="insights-daily-farthest-digipeated">No data yet</dd></div>
-                  <div><dt>Farthest any RF</dt><dd id="insights-daily-farthest-any-rf">No data yet</dd></div>
-                  <div><dt>Farthest network-side</dt><dd id="insights-daily-farthest-network">No data yet</dd></div>
-                  <div><dt>Best APRS audio</dt><dd id="insights-daily-aprs-audio">No data yet</dd></div>
-                  <div><dt>Common digipeater</dt><dd id="insights-daily-aprs-digi">No data yet</dd></div>
-                  <div><dt>Gate eligible</dt><dd id="insights-daily-gate-eligible">No data yet</dd></div>
-                  <div><dt>Gate confirmed</dt><dd id="insights-daily-gate-confirmed">No data yet</dd></div>
                   <div><dt>Confirmed gated by local station</dt><dd id="insights-daily-gate-me">No data yet</dd></div>
                   <div><dt>Local gate unconfirmed</dt><dd id="insights-daily-gate-unconfirmed">No data yet</dd></div>
                   <div><dt>Gate notice</dt><dd id="insights-daily-gate-notice">No data yet</dd></div>
-                  <div><dt>Gate competition</dt><dd id="insights-daily-gate-competition">No data yet</dd></div>
                   <div><dt>ADS-B range today</dt><dd id="insights-daily-adsb-range">No data yet</dd></div>
                   <div><dt>ADS-B highest today</dt><dd id="insights-daily-adsb-altitude">No data yet</dd></div>
                   <div><dt>ADS-B strongest today</dt><dd id="insights-daily-adsb-signal">No data yet</dd></div>
@@ -266,6 +261,10 @@
               <section class="visual-card visual-card-wide">
                 <h3>ADS-B Summary</h3>
                 <div id="visual-adsb-summary" class="metric-strip">No data yet</div>
+              </section>
+              <section class="visual-card visual-card-wide">
+                <h3>ADS-B Range Buckets</h3>
+                <div id="visual-adsb-ranges" class="range-bars">No data yet</div>
               </section>
               <section class="visual-card visual-card-wide">
                 <h3>Station Services</h3>
@@ -491,6 +490,10 @@
             <h2>ADS-B Tracking</h2>
             <span id="adsb-ui-status">tar1090</span>
           </div>
+          <section class="adsb-receiver-summary">
+            <div id="adsb-receiver-summary" class="metric-strip">No ADS-B receiver data yet.</div>
+            <p>Open tar1090 for full aircraft map and aircraft-level detail.</p>
+          </section>
           <div class="adsb-ui-wrap" id="adsb-ui-wrap">
             <iframe id="adsb-ui-frame" title="tar1090 ADS-B map" loading="lazy"></iframe>
             <div class="adsb-ui-fallback" id="adsb-ui-fallback">

@@ -35,6 +35,7 @@ const state = {
 const DATA_FETCH_LIMIT = 250;
 const EVENT_FEED_LIMIT = 30;
 const APRS_STATION_DEFAULT_LIMIT = 24;
+const APRS_STATION_MOBILE_LIMIT = 12;
 const HEALTH_REFRESH_MS = 5000;
 const DASHBOARD_REFRESH_MS = 30000;
 const LIVE_SECONDS = 60;
@@ -871,6 +872,10 @@ function sortAprsStationRows(rows) {
   return rows.sort(sorters[state.aprsStationSort] || byPackets);
 }
 
+function aprsStationDisplayLimit() {
+  return window.matchMedia?.("(max-width: 700px)")?.matches ? APRS_STATION_MOBILE_LIMIT : APRS_STATION_DEFAULT_LIMIT;
+}
+
 function renderAprsStations(events) {
   const groups = {};
   events.forEach((event) => {
@@ -882,7 +887,8 @@ function renderAprsStations(events) {
   const rows = sortAprsStationRows(Object.entries(groups)
     .map(([callsign, stationEvents]) => ({ callsign, events: stationEvents, summary: stationSummary(stationEvents) })));
   const total = rows.length;
-  const visibleRows = state.aprsStationsExpanded ? rows : rows.slice(0, APRS_STATION_DEFAULT_LIMIT);
+  const displayLimit = aprsStationDisplayLimit();
+  const visibleRows = state.aprsStationsExpanded ? rows : rows.slice(0, displayLimit);
   const toggle = $("aprs-stations-toggle");
   const showing = $("aprs-stations-showing");
 
@@ -890,11 +896,11 @@ function renderAprsStations(events) {
   if (showing) {
     showing.textContent = state.aprsStationsExpanded
       ? `Showing all ${total.toLocaleString()} stations`
-      : `Showing top ${Math.min(APRS_STATION_DEFAULT_LIMIT, total).toLocaleString()} of ${total.toLocaleString()} stations`;
+      : `Showing top ${Math.min(displayLimit, total).toLocaleString()} of ${total.toLocaleString()} stations`;
   }
   if (toggle) {
-    toggle.hidden = total <= APRS_STATION_DEFAULT_LIMIT;
-    toggle.textContent = state.aprsStationsExpanded ? `Show top ${APRS_STATION_DEFAULT_LIMIT}` : `Show all ${total.toLocaleString()}`;
+    toggle.hidden = total <= displayLimit;
+    toggle.textContent = state.aprsStationsExpanded ? `Show top ${displayLimit}` : `Show all ${total.toLocaleString()}`;
   }
   setHtml("aprs-stations-list", visibleRows.map(({ callsign, events: stationEvents, summary }) => {
     const metadata = summary.latestMetadata;
@@ -1857,6 +1863,10 @@ if (aprsStationSort) {
     renderAprsStations(state.latestAprs);
   });
 }
+
+window.matchMedia?.("(max-width: 700px)")?.addEventListener?.("change", () => {
+  renderAprsStations(state.latestAprs);
+});
 
 function syncEventFilterControls() {
   document.querySelectorAll("[data-event-filter]").forEach((input) => {

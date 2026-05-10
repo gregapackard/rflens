@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import configured_aprs_callsign, load_config, resolve_path
@@ -30,6 +30,11 @@ app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 @app.get("/")
 def root() -> RedirectResponse:
     return RedirectResponse(url="/ui")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
 @app.get("/api/health")

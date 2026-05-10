@@ -1,11 +1,16 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import backend.db as db
 from backend.ingestors.aprs_direwolf import (
     decoded_followup_metadata,
+    decoded_followup_candidate,
     enrich_packet,
     followup_boundary,
+    interval_due,
+    packet_header_candidate,
+    parse_audio_line,
     parse_decoded_followup_line,
     parse_gate_confirmation,
 )
@@ -15,6 +20,40 @@ STATION = {"lat": 39.9612, "lon": -82.9988}
 
 
 class AprsDirewolfParserTests(unittest.TestCase):
+    def test_fast_packet_header_candidate_filters_noise(self):
+        self.assertFalse(packet_header_candidate(""))
+        self.assertFalse(packet_header_candidate("audio level = 50(20/10) [+++]"))
+        self.assertFalse(packet_header_candidate("Tell the sender (K8QIK-2) to use the proper product identifier..."))
+        self.assertFalse(packet_header_candidate("N 40 02.5600, W 082 47.3700, course 92"))
+        self.assertTrue(packet_header_candidate("KD8NVS-1>APRS:!4000.00N/08300.00W-test"))
+
+    def test_fast_decoded_followup_candidate_filters_noise(self):
+        self.assertFalse(decoded_followup_candidate(""))
+        self.assertFalse(decoded_followup_candidate("K8LU-9 audio level = 50(20/10) [+++]"))
+        self.assertFalse(decoded_followup_candidate("Tell the sender (K8QIK-2) to use the proper product identifier..."))
+        self.assertTrue(decoded_followup_candidate("MIC-E, normal car (side view), Yaesu FTM-400DR, Off Duty"))
+        self.assertTrue(decoded_followup_candidate("N 40 02.5600, W 082 47.3700"))
+        self.assertTrue(decoded_followup_candidate("74 km/h (46 MPH), course 92, alt 316 m (1037 ft)"))
+
+    def test_non_candidate_followup_skips_coordinate_regexes(self):
+        with patch("backend.ingestors.aprs_direwolf.parse_decoded_position") as parse_position:
+            self.assertIsNone(parse_decoded_followup_line("Tell the sender (K8QIK-2) to use the proper product identifier..."))
+            self.assertIsNone(parse_decoded_followup_line("random demodulator chatter without decoded fields"))
+
+        parse_position.assert_not_called()
+
+    def test_audio_line_still_parses_with_callsign(self):
+        parsed = parse_audio_line("K8LU-9 audio level = 50(20/10) [+++]")
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["level"], 50)
+        self.assertEqual(parsed["quality"], "20/10")
+        self.assertEqual(parsed["source_callsign"], "K8LU-9")
+
+    def test_status_interval_helper_throttles_chatter_updates(self):
+        self.assertFalse(interval_due(100.0, 104.9, 5.0))
+        self.assertTrue(interval_due(100.0, 105.0, 5.0))
+
     def test_ig_tx_without_q_construct_is_not_confirmed_gating(self):
         result = parse_gate_confirmation(
             "ig>tx",

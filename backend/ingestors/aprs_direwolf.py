@@ -26,6 +26,7 @@ APRS_CALLSIGN = "KF8GBU-10"
 OWN_CALLSIGNS = {APRS_CALLSIGN}
 DUPLICATE_WINDOW_SECONDS = 60
 SOURCE_TOUCH_INTERVAL_SECONDS = 15
+STATUS_UPDATE_INTERVAL_SECONDS = 5
 EARTH_RADIUS_KM = 6371.0088
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
@@ -106,6 +107,24 @@ STATUS_PHRASES = (
     "Dire Wolf",
     "Direwolf",
 )
+DECODED_FOLLOWUP_HINTS = (
+    " mic-e",
+    "mic-e",
+    "mice",
+    "latitude",
+    "longitude",
+    "course",
+    "speed",
+    "altitude",
+    "manufacturer",
+    "device",
+    "symbol",
+    " mph",
+    " km/h",
+    " knots",
+    " kts",
+    " ft",
+)
 
 
 def split_prefix(line: str) -> tuple[str | None, str]:
@@ -129,17 +148,44 @@ def status_or_help_line(text: str) -> bool:
     return any(text.startswith(prefix) for prefix in STATUS_PREFIXES) or any(phrase in text for phrase in STATUS_PHRASES)
 
 
+def packet_header_candidate(text: str) -> bool:
+    if len(text) < 6 or ">" not in text or ":" not in text:
+        return False
+    header_end = text.find(":")
+    path_sep = text.find(">")
+    if path_sep <= 0 or header_end <= path_sep + 1:
+        return False
+    source = text[:path_sep].strip()
+    return bool(source and source[0].isalnum())
+
+
+def decoded_followup_candidate(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    lowered = stripped.lower()
+    if any(hint in lowered for hint in DECODED_FOLLOWUP_HINTS):
+        return True
+    upper = stripped.upper()
+    return upper.startswith(("N ", "S ")) and (" W " in upper or " E " in upper or ", W " in upper or ", E " in upper)
+
+
 def parse_audio_line(text: str) -> dict[str, Any] | None:
     match = AUDIO_LEVEL_RE.search(text)
     if not match:
         return None
-    callsign_match = re.match(r"\s*([A-Z0-9]{1,9}(?:-[0-9]{1,2})?)\s+audio level", text, re.IGNORECASE)
+    prefix = text[: match.start()].strip()
+    source_callsign = None
+    if prefix:
+        first_token = prefix.split()[-1].upper()
+        if CALLSIGN_RE.match(first_token):
+            source_callsign = first_token
     bar = text[match.end():].strip()
     return {
         "level": int(match.group(1)),
         "quality": match.group(2).strip(),
         "bar": bar or None,
-        "source_callsign": callsign_match.group(1).upper() if callsign_match else None,
+        "source_callsign": source_callsign,
         "timestamp": utc_now(),
     }
 
@@ -148,11 +194,12 @@ def followup_boundary(line: str) -> bool:
     prefix, text = split_prefix(line)
     if not text:
         return True
+    lowered = text.lower()
     return bool(
         ignored_prefix(prefix)
-        or parse_audio_line(text)
+        or ("audio level" in lowered and parse_audio_line(text))
         or status_or_help_line(text)
-        or packet_like(line)
+        or (packet_header_candidate(text) and packet_like(line))
     )
 
 
@@ -205,7 +252,7 @@ def aprs_is_status_line(text: str) -> bool:
 
 
 def parse_packet_header(text: str) -> tuple[str, str, str] | None:
-    if ">" not in text or ":" not in text:
+    if not packet_header_candidate(text):
         return None
     header, _payload = text.split(":", 1)
     if ">" not in header:
@@ -253,9 +300,9 @@ def packet_like(line: str) -> bool:
     prefix, text = split_prefix(line)
     if ignored_prefix(prefix):
         return False
-    if len(text) < 6:
-        return False
     if status_or_help_line(text):
+        return False
+    if not packet_header_candidate(text):
         return False
     parsed_header = parse_packet_header(text)
     if not parsed_header:
@@ -430,10 +477,16 @@ def parse_decoded_followup_line(text: str) -> dict[str, Any] | None:
         return None
     if ignored_prefix(prefix):
         return None
+    if aprs_is_status_line(line) or status_or_help_line(line):
+        return None
+    if packet_header_candidate(line) and parse_packet_header(line):
+        return None
     lowered = line.lower()
-    if parse_packet_header(line) or parse_audio_line(line) or aprs_is_status_line(line) or status_or_help_line(line):
+    if "audio level" in lowered and parse_audio_line(line):
         return None
     if any(phrase in lowered for phrase in IGNORED_FOLLOWUP_PHRASES):
+        return None
+    if not decoded_followup_candidate(line):
         return None
     lat, lon = parse_decoded_position(line)
     decoded: dict[str, Any] = {}
@@ -683,6 +736,10 @@ def touch_source_if_due(source_id: int, status: str, last_touch_at: float, *, fo
     return last_touch_at
 
 
+def interval_due(last_update_at: float, now: float, interval: float = STATUS_UPDATE_INTERVAL_SECONDS) -> bool:
+    return now - last_update_at >= interval
+
+
 def update_rf_metrics(total: int, callsigns: set[str], last_callsign: str | None, timestamp: str) -> None:
     update_aprs_status(
         online=True,
@@ -739,6 +796,9 @@ def run_forever() -> None:
     aprs_is_verified = False
     recent_packet: dict[str, Any] | None = None
     last_source_touch_at = 0.0
+    last_igate_update_at = 0.0
+    last_audio_update_at = 0.0
+    last_status_update_at = 0.0
     reset_aprs_status(local_callsign)
     hydrated_status = hydrate_aprs_status_from_recent_events(local_callsign)
     rf_packets_heard_total = int(hydrated_status.get("rf_packets_heard_total") or 0)
@@ -757,24 +817,31 @@ def run_forever() -> None:
             recent_packet = None
         if ignored_prefix(prefix):
             ignored_igate_lines += 1
-            confirmation = parse_gate_confirmation(prefix, text, local_callsign)
+            now = time.time()
+            confirmation = parse_gate_confirmation(prefix, text, local_callsign) if ",qa" in text.lower() else None
             if confirmation:
                 update_recent_aprs_gate_confirmation(raw_text=text, **confirmation)
-            fields = parse_igate_status(text, local_callsign)
-            aprs_is_connected = bool(fields.get("aprs_is_connected", aprs_is_connected))
-            aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
-            fields["ignored_igate_lines"] = ignored_igate_lines
-            update_aprs_status(**fields)
+            if confirmation or aprs_is_status_line(text) or interval_due(last_igate_update_at, now):
+                fields = parse_igate_status(text, local_callsign)
+                aprs_is_connected = bool(fields.get("aprs_is_connected", aprs_is_connected))
+                aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
+                fields["ignored_igate_lines"] = ignored_igate_lines
+                update_aprs_status(**fields)
+                last_igate_update_at = now
             last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         audio_status = parse_audio_line(text)
         if audio_status:
             ignored_status_lines += 1
+            now = time.time()
             level = int(audio_status["level"])
             quality = str(audio_status["quality"])
             last_audio = audio_status
-            update_audio_metrics(level, quality, best_audio_level, ignored_status_lines)
-            if best_audio_level is None or level > best_audio_level:
+            is_new_best = best_audio_level is None or level > best_audio_level
+            if is_new_best or interval_due(last_audio_update_at, now):
+                update_audio_metrics(level, quality, best_audio_level, ignored_status_lines)
+                last_audio_update_at = now
+            if is_new_best:
                 best_audio_level = level
             last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
@@ -810,8 +877,12 @@ def run_forever() -> None:
                 aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
                 fields["ignored_status_lines"] = ignored_status_lines
                 update_aprs_status(**fields)
+                last_status_update_at = time.time()
             else:
-                update_ignored_status(ignored_status_lines)
+                now = time.time()
+                if interval_due(last_status_update_at, now):
+                    update_ignored_status(ignored_status_lines)
+                    last_status_update_at = now
             last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         if not packet_like(line):

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .config import get_database_path, load_config
+from .config import DEFAULT_APRS_CALLSIGN, configured_aprs_callsign, get_database_path, load_config
 
 
 LOGGER = logging.getLogger(__name__)
@@ -472,10 +472,10 @@ def cleanup_old_events(conn: sqlite3.Connection) -> None:
         LOGGER.warning("Skipping event retention cleanup: %s", exc)
 
 
-def default_aprs_status() -> dict[str, Any]:
+def default_aprs_status(callsign: str | None = None) -> dict[str, Any]:
     return {
         "online": False,
-        "callsign": "KF8GBU-10",
+        "callsign": callsign or configured_aprs_callsign(),
         "aprs_is_connected": False,
         "aprs_is_verified": False,
         "aprs_is_server": None,
@@ -520,7 +520,8 @@ def ensure_aprs_status_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def reset_aprs_status(callsign: str = "KF8GBU-10") -> None:
+def reset_aprs_status(callsign: str | None = None) -> None:
+    callsign = callsign or configured_aprs_callsign()
     now = utc_now()
     with connect() as conn:
         ensure_aprs_status_table(conn)
@@ -555,7 +556,8 @@ def reset_aprs_status(callsign: str = "KF8GBU-10") -> None:
         )
 
 
-def hydrate_aprs_status_from_recent_events(callsign: str = "KF8GBU-10") -> dict[str, Any]:
+def hydrate_aprs_status_from_recent_events(callsign: str | None = None) -> dict[str, Any]:
+    callsign = callsign or configured_aprs_callsign()
     now = utc_now()
     with connect() as conn:
         ensure_aprs_status_table(conn)
@@ -706,20 +708,27 @@ def update_aprs_status(**fields: Any) -> None:
                 rf_packets_heard_total, unique_callsigns_seen,
                 ignored_igate_lines, ignored_status_lines, updated_at
             )
-            VALUES (1, 'KF8GBU-10', 1, 0, 0, 0, 0, 0, 0, ?)
+            VALUES (1, ?, 1, 0, 0, 0, 0, 0, 0, ?)
             """,
-            (utc_now(),),
+            (configured_aprs_callsign(), utc_now()),
         )
         conn.execute(f"UPDATE aprs_status SET {columns} WHERE id = 1", values)
 
 
 def fetch_aprs_status() -> dict[str, Any]:
+    current_callsign = configured_aprs_callsign()
     with connect() as conn:
         ensure_aprs_status_table(conn)
         row = conn.execute("SELECT * FROM aprs_status WHERE id = 1").fetchone()
         if not row:
-            return default_aprs_status()
+            return default_aprs_status(current_callsign)
         status = row_to_dict(row)
+        if status.get("callsign") != current_callsign:
+            conn.execute(
+                "UPDATE aprs_status SET callsign = ?, updated_at = ? WHERE id = 1",
+                (current_callsign, utc_now()),
+            )
+            status["callsign"] = current_callsign
         stored_total = int(status.get("rf_packets_heard_total") or 0)
         if stored_total == 0:
             metrics = aprs_rf_metrics_from_events(conn)
@@ -1225,7 +1234,7 @@ def top_count(items: list[str]) -> str | None:
 def gate_status_phrase(metadata: dict[str, Any]) -> str | None:
     gated_by = metadata.get("gated_by")
     if metadata.get("confirmed_gated_by_me") is True:
-        return f"confirmed gated by {gated_by or 'KF8GBU-10'}"
+        return f"confirmed gated by {gated_by or 'local station'}"
     if metadata.get("gated_by_other") is True and gated_by:
         return f"seen on APRS-IS via {gated_by}"
     if metadata.get("gate_eligible") is True:
@@ -1318,7 +1327,7 @@ def aprs_gate_stats(events_with_metadata: list[tuple[dict[str, Any], dict[str, A
         "heard_over_rf": len(heard_rf),
         "gate_eligible": len(gate_eligible),
         "gate_confirmed": len(confirmed_me),
-        "confirmed_gated_by_kf8gbu_10": len(confirmed_me),
+        "confirmed_gated_by_local": len(confirmed_me),
         "gated_by_other": len(gated_other),
         "likely_competing_igates_or_digipeaters": competing_likely,
         "language": (
@@ -1450,7 +1459,7 @@ def aprs_event_sentence(event: dict[str, Any]) -> str:
         if metadata.get("gated_by_other") is True and metadata.get("gated_by"):
             return f"I saw {callsign} on APRS-IS/network traffic, seen on APRS-IS via {metadata.get('gated_by')}."
         if metadata.get("confirmed_gated_by_me") is True:
-            return f"I saw {callsign} on APRS-IS/network traffic, confirmed gated by {metadata.get('gated_by') or 'KF8GBU-10'}."
+            return f"I saw {callsign} on APRS-IS/network traffic, confirmed gated by {metadata.get('gated_by') or 'local station'}."
         return f"I saw {callsign} on APRS-IS/network traffic, but it was not heard directly by the antenna."
     if category == "direct_rf":
         parts = [f"I heard {callsign} directly over RF"]
@@ -1496,7 +1505,7 @@ def fetch_insights() -> dict[str, Any]:
 
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     aprs_status = fetch_aprs_status()
-    local_callsign = str(aprs_status.get("callsign") or "KF8GBU-10")
+    local_callsign = str(aprs_status.get("callsign") or DEFAULT_APRS_CALLSIGN)
     records = record_by_type(fetch_records())
     aprs_recent = fetch_all(
         """
@@ -1662,7 +1671,7 @@ def fetch_insights() -> dict[str, Any]:
             "most_common_digipeater_path_today": top_digi_today,
             "gate_eligible_today": gate_stats_today["gate_eligible"],
             "gate_confirmed_today": gate_stats_today["gate_confirmed"],
-            "confirmed_gated_by_kf8gbu_10_today": gate_stats_today["confirmed_gated_by_kf8gbu_10"],
+            "confirmed_gated_by_local_today": gate_stats_today["confirmed_gated_by_local"],
             "gate_unconfirmed_today": max(gate_stats_today["gate_eligible"] - gate_stats_today["gate_confirmed"], 0),
             "gate_notice_today": (
                 f"RF heard and gate eligible, but no APRS-IS path proof confirms {local_callsign} gated a packet today."

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from backend.config import resolve_path, source_config
+from backend.config import DEFAULT_APRS_CALLSIGN, configured_aprs_callsign, resolve_path, source_config
 from backend.config import load_config
 from backend.db import (
     fetch_recent_aprs_callsigns,
@@ -25,8 +25,7 @@ from backend.db import (
 
 
 LOGGER = logging.getLogger(__name__)
-APRS_CALLSIGN = "KF8GBU-10"
-OWN_CALLSIGNS = {APRS_CALLSIGN}
+OWN_CALLSIGNS = {DEFAULT_APRS_CALLSIGN}
 DUPLICATE_WINDOW_SECONDS = 60
 SOURCE_TOUCH_INTERVAL_SECONDS = 15
 STATUS_UPDATE_INTERVAL_SECONDS = 5
@@ -207,19 +206,7 @@ def followup_boundary(line: str) -> bool:
     )
 
 
-def configured_aprs_callsign(config: dict[str, Any] | None = None) -> str:
-    cfg = config or load_config()
-    station_cfg = cfg.get("station", {}) or {}
-    aprs_cfg = source_config("aprs", cfg)
-    return str(
-        aprs_cfg.get("callsign")
-        or station_cfg.get("aprs_callsign")
-        or station_cfg.get("callsign")
-        or APRS_CALLSIGN
-    ).upper()
-
-
-def parse_igate_status(text: str, local_callsign: str = APRS_CALLSIGN) -> dict[str, Any]:
+def parse_igate_status(text: str, local_callsign: str = DEFAULT_APRS_CALLSIGN) -> dict[str, Any]:
     lowered = text.lower()
     fields: dict[str, Any] = {
         "online": True,
@@ -234,7 +221,7 @@ def parse_igate_status(text: str, local_callsign: str = APRS_CALLSIGN) -> dict[s
     return fields
 
 
-def parse_gate_confirmation(prefix: str | None, text: str, local_callsign: str = APRS_CALLSIGN) -> dict[str, Any] | None:
+def parse_gate_confirmation(prefix: str | None, text: str, local_callsign: str = DEFAULT_APRS_CALLSIGN) -> dict[str, Any] | None:
     parsed_header = parse_packet_header(text)
     if not parsed_header:
         return None
@@ -709,7 +696,7 @@ def duplicate_packet(packet_line: str, seen_packets: dict[str, float], now: floa
     return False
 
 
-def update_ignored_igate(count: int, text: str, local_callsign: str = APRS_CALLSIGN) -> None:
+def update_ignored_igate(count: int, text: str, local_callsign: str = DEFAULT_APRS_CALLSIGN) -> None:
     fields = parse_igate_status(text, local_callsign)
     fields["ignored_igate_lines"] = count
     update_aprs_status(**fields)

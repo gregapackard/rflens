@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import load_config, resolve_path
+from .config import configured_aprs_callsign, load_config, resolve_path
 from .db import ensure_configured_sources, fetch_all, fetch_aprs_status, fetch_insights, fetch_records, init_db, insert_event
 from .models import EventIn
 from .system_stats import memory_stats_from_values, read_meminfo_memory
@@ -48,6 +48,8 @@ def station() -> dict[str, object]:
     station_cfg = cfg.get("station", {}) or {}
     return {
         "name": station_cfg.get("name"),
+        "callsign": station_cfg.get("callsign"),
+        "aprs_callsign": station_cfg.get("aprs_callsign") or configured_aprs_callsign(cfg),
         "lat": station_cfg.get("lat"),
         "lon": station_cfg.get("lon"),
         "grid": station_cfg.get("grid"),

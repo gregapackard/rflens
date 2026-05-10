@@ -9,6 +9,7 @@ import yaml
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = ROOT_DIR / "config.yaml"
 EXAMPLE_CONFIG_PATH = ROOT_DIR / "config.example.yaml"
+DEFAULT_APRS_CALLSIGN = "NOCALL"
 
 
 def resolve_path(path: str | Path) -> Path:
@@ -34,3 +35,15 @@ def get_database_path(config: dict[str, Any] | None = None) -> Path:
 def source_config(name: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = config or load_config()
     return cfg.get("sources", {}).get(name, {}) or {}
+
+
+def configured_aprs_callsign(config: dict[str, Any] | None = None) -> str:
+    cfg = config or load_config()
+    station_cfg = cfg.get("station", {}) or {}
+    aprs_cfg = cfg.get("sources", {}).get("aprs", {}) or {}
+    return str(
+        aprs_cfg.get("callsign")
+        or station_cfg.get("aprs_callsign")
+        or station_cfg.get("callsign")
+        or DEFAULT_APRS_CALLSIGN
+    ).upper()

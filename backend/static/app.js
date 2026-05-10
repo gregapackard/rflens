@@ -1229,7 +1229,7 @@ function renderBriefing({ insights = {}, adsb = [], sources = [], system = {}, a
   const adsbRange = cleanBriefingValue(daily.adsb_max_range_today);
   const adsbAltitude = cleanBriefingValue(daily.adsb_highest_altitude_today);
   const adsbSignal = cleanBriefingValue(daily.adsb_strongest_signal_today);
-  const confirmedGate = Number(daily.confirmed_gated_by_kf8gbu_10_today ?? daily.gate_confirmed_today);
+  const confirmedGate = Number(daily.confirmed_gated_by_local_today ?? daily.gate_confirmed_today);
   const gateNotice = cleanBriefingValue(daily.gate_notice_today || insights.aprs?.gate?.notice);
   const cards = [];
 
@@ -1284,7 +1284,7 @@ function renderInsights(insights = {}, adsb = [], sources = [], system = {}, apr
   setText("insights-daily-digipeated-rf", fallbackText(daily.digipeated_rf_heard_today));
   setText("insights-daily-farthest-direct", fallbackText(daily.farthest_direct_rf_today));
   setText("insights-daily-farthest-digipeated", fallbackText(daily.farthest_digipeated_rf_today));
-  setText("insights-daily-gate-me", fallbackText(daily.confirmed_gated_by_kf8gbu_10_today));
+  setText("insights-daily-gate-me", fallbackText(daily.confirmed_gated_by_local_today ?? daily.gate_confirmed_today));
   setText("insights-daily-gate-unconfirmed", fallbackText(daily.gate_unconfirmed_today));
   setText("insights-daily-gate-notice", fallbackText(daily.gate_notice_today || insights.aprs?.gate?.notice));
   setText("insights-daily-adsb-range", fallbackText(daily.adsb_max_range_today));
@@ -1827,7 +1827,7 @@ function renderStationProfile({ station, sources, aprsStatus, insights, system }
   const daily = insights?.daily || {};
   const stationName = station?.name || "RF Node";
   const callsign = aprsStatus?.callsign || "No data yet";
-  const confirmedGated = Number(daily.confirmed_gated_by_kf8gbu_10_today ?? daily.gate_confirmed_today);
+  const confirmedGated = Number(daily.confirmed_gated_by_local_today ?? daily.gate_confirmed_today);
   const gateEligible = Number(daily.gate_eligible_today);
   const gateNote = Number.isFinite(confirmedGated) && confirmedGated > 0
     ? `${confirmedGated.toLocaleString()} packet${confirmedGated === 1 ? "" : "s"} confirmed by APRS-IS path proof today.`

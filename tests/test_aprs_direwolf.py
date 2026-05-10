@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import backend.db as db
+import backend.config as config
 from backend.ingestors.aprs_direwolf import (
     decoded_followup_metadata,
     decoded_followup_candidate,
@@ -22,6 +23,62 @@ STATION = {"lat": 39.9612, "lon": -82.9988}
 
 
 class AprsDirewolfParserTests(unittest.TestCase):
+    def test_configured_aprs_callsign_uses_config_priority(self):
+        with patch("backend.config.load_config", return_value={
+            "station": {"callsign": "N0CALL", "aprs_callsign": "N0CALL-10"},
+            "sources": {"aprs": {"callsign": "N0CALL-7"}},
+        }):
+            self.assertEqual(config.configured_aprs_callsign(), "N0CALL-7")
+
+        with patch("backend.config.load_config", return_value={
+            "station": {"callsign": "N0CALL", "aprs_callsign": "N0CALL-10"},
+            "sources": {"aprs": {}},
+        }):
+            self.assertEqual(config.configured_aprs_callsign(), "N0CALL-10")
+
+        with patch("backend.config.load_config", return_value={
+            "station": {"callsign": "N0CALL"},
+            "sources": {"aprs": {}},
+        }):
+            self.assertEqual(config.configured_aprs_callsign(), "N0CALL")
+
+    def test_default_aprs_status_uses_configured_callsign_not_personal_default(self):
+        with patch("backend.config.load_config", return_value={
+            "station": {"callsign": "N0CALL", "aprs_callsign": "N0CALL-10"},
+            "sources": {"aprs": {"enabled": False}},
+        }):
+            status = db.default_aprs_status()
+
+        self.assertEqual(status["callsign"], "N0CALL-10")
+        self.assertNotEqual(status["callsign"], "KF8GBU-10")
+
+    def test_fetch_aprs_status_fresh_database_uses_configured_callsign(self):
+        original_get_database_path = db.get_database_path
+        test_db = Path.cwd() / "data" / "test-aprs-config-callsign.db"
+        db.get_database_path = lambda config=None: test_db
+        try:
+            test_db.parent.mkdir(parents=True, exist_ok=True)
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(f"{test_db}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+            db.init_db(test_db)
+            with patch("backend.config.load_config", return_value={
+                "station": {"callsign": "N0CALL", "aprs_callsign": "N0CALL-10"},
+                "sources": {"aprs": {"enabled": False}},
+            }):
+                status = db.fetch_aprs_status()
+        finally:
+            db.get_database_path = original_get_database_path
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(f"{test_db}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+
+        self.assertFalse(status["online"])
+        self.assertEqual(status["callsign"], "N0CALL-10")
+        self.assertNotEqual(status["callsign"], "KF8GBU-10")
+
     def test_fast_packet_header_candidate_filters_noise(self):
         self.assertFalse(packet_header_candidate(""))
         self.assertFalse(packet_header_candidate("audio level = 50(20/10) [+++]"))

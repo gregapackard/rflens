@@ -19,6 +19,7 @@ const state = {
   selectedAprsEventsByCallsign: {},
   aprsStationSort: "packet_count_desc",
   aprsStationsExpanded: false,
+  aprsStationSearch: "",
   profileSummary: "",
   allTimeRecords: [],
   records: {
@@ -1013,20 +1014,39 @@ function renderAprsStations(events) {
   });
   const rows = sortAprsStationRows(Object.entries(groups)
     .map(([callsign, stationEvents]) => ({ callsign, events: stationEvents, summary: stationSummary(stationEvents) })));
+
+  // Filter by search query (operates on all rows before display limit)
+  const searchQuery = (state.aprsStationSearch || "").trim().toUpperCase();
+  const filteredRows = searchQuery
+    ? rows.filter((row) => {
+        const meta = row.summary.latestMetadata;
+        const matchCallsign = row.callsign.toUpperCase().includes(searchQuery);
+        const matchType = meta.station_type && meta.station_type.toUpperCase().includes(searchQuery);
+        const matchCategory = meta.heard_category && meta.heard_category.toUpperCase().replace(/_/g, " ").includes(searchQuery.replace(/_/g, " "));
+        const matchSourceCallsign = meta.source_callsign && meta.source_callsign.toUpperCase().includes(searchQuery);
+        return matchCallsign || matchType || matchCategory || matchSourceCallsign;
+      })
+    : rows;
   const total = rows.length;
+  const filtered = filteredRows.length;
   const displayLimit = aprsStationDisplayLimit();
-  const visibleRows = state.aprsStationsExpanded ? rows : rows.slice(0, displayLimit);
+  const isSearchActive = searchQuery.length > 0;
+  const visibleRows = (isSearchActive || state.aprsStationsExpanded) ? filteredRows : filteredRows.slice(0, displayLimit);
   const toggle = $("aprs-stations-toggle");
   const showing = $("aprs-stations-showing");
 
   setText("aprs-tab-count", `${total.toLocaleString()} stations`);
   if (showing) {
-    showing.textContent = state.aprsStationsExpanded
-      ? `Showing all ${total.toLocaleString()} stations`
-      : `Showing top ${Math.min(displayLimit, total).toLocaleString()} of ${total.toLocaleString()} stations`;
+    if (isSearchActive) {
+      showing.textContent = `Found ${filtered.toLocaleString()} of ${total.toLocaleString()} stations`;
+    } else {
+      showing.textContent = state.aprsStationsExpanded
+        ? `Showing all ${total.toLocaleString()} stations`
+        : `Showing top ${Math.min(displayLimit, total).toLocaleString()} of ${total.toLocaleString()} stations`;
+    }
   }
   if (toggle) {
-    toggle.hidden = total <= displayLimit;
+    toggle.hidden = isSearchActive || total <= displayLimit;
     toggle.textContent = state.aprsStationsExpanded ? `Show top ${displayLimit}` : `Show all ${total.toLocaleString()}`;
   }
   setHtml("aprs-stations-list", visibleRows.map(({ callsign, events: stationEvents, summary }) => {
@@ -2238,6 +2258,16 @@ if (aprsStationSort) {
   aprsStationSort.value = state.aprsStationSort;
   aprsStationSort.addEventListener("change", () => {
     state.aprsStationSort = aprsStationSort.value || "packet_count_desc";
+    renderAprsStations(state.latestAprs);
+  });
+}
+
+// APRS station search/filter
+const aprsStationSearch = $("aprs-station-search");
+if (aprsStationSearch) {
+  aprsStationSearch.value = state.aprsStationSearch;
+  aprsStationSearch.addEventListener("input", () => {
+    state.aprsStationSearch = aprsStationSearch.value;
     renderAprsStations(state.latestAprs);
   });
 }

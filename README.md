@@ -391,6 +391,28 @@ Common first-start problems:
 - Open-source software: it builds on tools such as Direwolf, readsb, tar1090, SatDump, SQLite, and FastAPI.
 - Operator-focused insight: the dashboard should explain what is notable, not just list raw rows.
 
+## Related Tools and Acknowledgements
+
+RFLens is designed to sit above excellent existing local RF tools:
+
+- [Dire Wolf](https://github.com/wb2osz/direwolf) - APRS packet decoding and APRS-IS/iGate workflows
+- [readsb](https://github.com/wiedehopf/readsb) - ADS-B decoding
+- [tar1090](https://github.com/wiedehopf/tar1090) - ADS-B aircraft map and aircraft-level detail
+- [SatDump](https://www.satdump.org/) - satellite/weather capture workflows
+- [FastAPI](https://fastapi.tiangolo.com/) - local API framework
+- [SQLite](https://www.sqlite.org/) - local event/config storage
+
+RFLens does not replace these tools, and those projects do not endorse RFLens. It summarizes local outputs from them into a station observability dashboard.
+
+## Development Transparency
+
+RFLens has been developed with AI-assisted coding support, along with manual review, live testing on a local RF node, and iterative validation against real APRS, ADS-B, and station-health data.
+
+AI assistance was used for code generation, refactoring, documentation drafts, and test scaffolding. Project direction, testing, integration decisions, and operational validation are human-led.
+
+## License
+
+RFLens is released under the MIT License. See LICENSE for details.
 
 ## Notes
 

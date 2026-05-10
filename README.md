@@ -105,7 +105,9 @@ Notable station timeline and advanced raw/debug record access.
 
 ![RFLens Timeline](docs/screenshots/timeline.png)
 
-## Quick Start
+## First 30 Minutes
+
+This path gets RFLens running with station/system health only. APRS, ADS-B, and SatDump can stay disabled until their source tools are working.
 
 ```bash
 git clone <your-rflens-repo-url> rflens
@@ -113,15 +115,20 @@ cd rflens
 bash ./scripts/setup.sh
 ```
 
-Then edit the generated private config and run the setup check:
+Edit the generated private config. At minimum, set your station name, callsign, grid, and location, or leave approximate placeholder location values for first API testing:
 
 ```bash
 nano config.yaml
-python scripts/check_setup.py
+```
+
+Run the setup check and start the API:
+
+```bash
+./venv/bin/python scripts/check_setup.py
 bash ./scripts/run_api.sh
 ```
 
-Open the dashboard at:
+Open the dashboard:
 
 ```text
 http://localhost:8080/ui
@@ -130,6 +137,8 @@ http://localhost:8080/ui
 For a LAN node, use the host name or IP of the machine running RFLens, for example `http://rflens.local:8080/ui`.
 
 RFLens is hostname-friendly. The frontend uses relative `/api/...` and `/ui/...` paths, so it works through DNS, mDNS, or a reviewed reverse proxy such as `http://rflens/`.
+
+After the manual API run works, enable optional RF sources one at a time in `config.yaml`, rerun `scripts/check_setup.py`, and then start the matching ingestor. Treat systemd as the next step after manual startup is proven.
 
 ## Configuration
 
@@ -166,6 +175,8 @@ RFLens does not require every source to be present. These are valid alpha setups
 
 The API can start with no external RF sources. Missing optional files should appear as warnings or source status, not as first-start blockers.
 
+Minimum useful install: station config plus system health. This lets a new user prove Python, SQLite, FastAPI, static assets, and the local dashboard are working before touching radios or source integrations.
+
 ## Run Manually
 
 Initialize or update the SQLite schema:
@@ -185,6 +196,8 @@ Run enabled sources with the helper:
 ```bash
 bash ./scripts/run_all.sh
 ```
+
+`run_all.sh` starts the API and only the ingestors whose `sources.<name>.enabled` value is `true`.
 
 Or run ingestors directly:
 
@@ -261,6 +274,8 @@ Technical-alpha systemd unit files live in `deploy/systemd/`. They use generic `
 
 The `rflens-api` service starts RFLens through `scripts/run_api.sh`, so it honors `server.host` and `server.port` from `config.yaml`. Set `RFLENS_HOST` or `RFLENS_PORT` in the service environment only if you need to override config.
 
+Do the manual run first. Install systemd services only after `bash ./scripts/run_api.sh` works and `curl http://localhost:8080/api/health` returns `ok`.
+
 Install RFLens under `/opt/rflens`, run setup as the service user, then install the templates and start the API:
 
 ```bash
@@ -315,7 +330,7 @@ bash ./deploy/uninstall_systemd.sh
 Run the setup check:
 
 ```bash
-python scripts/check_setup.py
+./venv/bin/python scripts/check_setup.py
 ```
 
 Common checks:
@@ -336,6 +351,16 @@ journalctl -u rflens-adsb -n 60 --no-pager
 ```
 
 If an optional source is disabled, do not start that source service. If it is enabled but its source file is missing, RFLens should continue running and report the source as missing or waiting.
+
+Common first-start problems:
+
+- Port already in use: edit `server.port` in `config.yaml`, or run with `RFLENS_PORT=8081 bash ./scripts/run_api.sh`.
+- `config.yaml` missing: run `bash ./scripts/setup.sh`, or copy `config.example.yaml` to `config.yaml`.
+- Dependency install failed: rerun `bash ./scripts/setup.sh` and inspect the pip error. On Debian/Ubuntu, make sure `python3-venv` is installed.
+- APRS enabled but Direwolf log missing: disable `sources.aprs.enabled` for API-only startup, or fix `sources.aprs.log_path`.
+- ADS-B enabled but `aircraft.json` missing: disable `sources.adsb.enabled`, start readsb, or correct `sources.adsb.aircraft_json_path`.
+- tar1090 URL unreachable: set `adsb_ui.enabled: false` until tar1090 is reachable from the browser.
+- systemd service failed: run `journalctl -u rflens-api -n 80 --no-pager` and verify `/opt/rflens`, `User=rflens`, and the venv path exist.
 
 ## API
 

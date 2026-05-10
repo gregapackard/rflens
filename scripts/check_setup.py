@@ -18,16 +18,38 @@ EXAMPLE_CONFIG_PATH = ROOT_DIR / "config.example.yaml"
 class Reporter:
     def __init__(self) -> None:
         self.failures = 0
+        self.warnings = 0
+        self.suggestions: list[str] = []
 
     def ok(self, message: str) -> None:
         print(f"OK   {message}")
 
     def warn(self, message: str) -> None:
+        self.warnings += 1
         print(f"WARN {message}")
 
     def fail(self, message: str) -> None:
         self.failures += 1
         print(f"FAIL {message}")
+
+    def suggest(self, message: str) -> None:
+        if message not in self.suggestions:
+            self.suggestions.append(message)
+
+    def print_next_actions(self) -> None:
+        if not self.failures and not self.warnings:
+            print()
+            print("Setup check passed. Next: bash ./scripts/run_api.sh")
+            return
+        print()
+        print("Next actions:")
+        if self.failures:
+            print("  - Fix FAIL items before starting RFLens.")
+        for suggestion in self.suggestions:
+            print(f"  - {suggestion}")
+        if self.warnings and not self.failures:
+            print("  - WARN items do not block API-only startup; disabled sources can be configured later.")
+            print("  - Start the API with: bash ./scripts/run_api.sh")
 
 
 def resolve_path(value: str | Path) -> Path:
@@ -122,6 +144,10 @@ def check_station(reporter: Reporter, cfg: dict[str, Any]) -> None:
             reporter.ok(f"station.{key} configured")
         else:
             reporter.warn(f"station.{key} is missing")
+            reporter.suggest(f"Edit config.yaml and set station.{key}.")
+    if str(station.get("callsign") or "").upper() == "N0CALL":
+        reporter.warn("station.callsign still uses the N0CALL placeholder")
+        reporter.suggest("Replace N0CALL placeholders in config.yaml with your station callsign.")
 
 
 def check_path_exists(reporter: Reporter, label: str, path_value: Any) -> None:
@@ -143,6 +169,7 @@ def main() -> int:
         cfg = load_yaml(CONFIG_PATH)
     elif EXAMPLE_CONFIG_PATH.exists():
         reporter.warn("config.yaml not found; using config.example.yaml for this check")
+        reporter.suggest("Create a private config first: cp config.example.yaml config.yaml")
         cfg = load_yaml(EXAMPLE_CONFIG_PATH)
     else:
         reporter.fail("No config.yaml or config.example.yaml found")
@@ -173,7 +200,10 @@ def main() -> int:
             reporter.ok("APRS local/iGate callsign configured")
         else:
             reporter.warn("APRS enabled but no local/iGate callsign is configured")
+            reporter.suggest("Set sources.aprs.callsign or station.aprs_callsign before running rflens-aprs.")
         check_path_exists(reporter, "Direwolf log path", aprs.get("log_path"))
+        if value_present(aprs.get("log_path")) and not resolve_path(str(aprs.get("log_path"))).exists():
+            reporter.suggest("Start Direwolf or correct sources.aprs.log_path before running rflens-aprs.")
     else:
         reporter.ok("APRS source disabled")
 
@@ -182,6 +212,8 @@ def main() -> int:
     if adsb.get("enabled"):
         reporter.ok("ADS-B source enabled")
         check_path_exists(reporter, "readsb aircraft.json path", adsb.get("aircraft_json_path"))
+        if value_present(adsb.get("aircraft_json_path")) and not resolve_path(str(adsb.get("aircraft_json_path"))).exists():
+            reporter.suggest("Start readsb or correct sources.adsb.aircraft_json_path before running rflens-adsb.")
     else:
         reporter.ok("ADS-B source disabled")
 
@@ -190,6 +222,7 @@ def main() -> int:
             reporter.ok(f"ADS-B UI URL configured: {adsb_ui.get('url')}")
         else:
             reporter.warn("adsb_ui is enabled but url is empty")
+            reporter.suggest("Set adsb_ui.url or disable adsb_ui until tar1090 is reachable.")
     else:
         reporter.ok("ADS-B UI disabled")
 
@@ -197,6 +230,8 @@ def main() -> int:
     if satellite.get("enabled"):
         reporter.ok("SatDump capture watcher enabled")
         check_path_exists(reporter, "SatDump captures path", satellite.get("captures_path"))
+        if value_present(satellite.get("captures_path")) and not resolve_path(str(satellite.get("captures_path"))).exists():
+            reporter.suggest("Create sources.satellite.captures_path or disable satellite until SatDump is configured.")
     else:
         reporter.ok("SatDump capture watcher disabled")
 
@@ -207,9 +242,11 @@ def main() -> int:
             reporter.ok(f"system.disk_path exists: {path}")
         else:
             reporter.warn(f"system.disk_path does not exist yet: {path}")
+            reporter.suggest("Create system.disk_path or remove it to use the database directory.")
     else:
         reporter.ok("system.disk_path not set; database parent will be used")
 
+    reporter.print_next_actions()
     return 1 if reporter.failures else 0
 
 

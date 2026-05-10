@@ -75,14 +75,35 @@ Not yet ideal for:
 
 ## Screenshots
 
-Screenshots will be added as the v0.1 alpha install flow stabilizes.
+### Dashboard
 
-Planned:
+Quick-read station briefing, APRS/ADS-B summaries, service health, and receiver visuals.
 
-- Dashboard
-- APRS Stations Heard
-- Station Profile
-- ADS-B Receiver Summary
+![RFLens Dashboard](docs/screenshots/dashboard.png)
+
+### Station Profile
+
+A shareable snapshot of the local RF node, including APRS reach, ADS-B range, iGate honesty, and station health.
+
+![RFLens Station Profile](docs/screenshots/station-profile.png)
+
+### APRS Stations Heard
+
+Station-first APRS view with sorting, show-more behavior, and callsign drilldown.
+
+![RFLens APRS Stations Heard](docs/screenshots/aprs.png)
+
+### ADS-B Receiver Summary
+
+ADS-B receiver performance summaries with tar1090 kept as the full aircraft map/detail view.
+
+![RFLens ADS-B Receiver Summary](docs/screenshots/adsb.png)
+
+### Timeline / Advanced Records
+
+Notable station timeline and advanced raw/debug record access.
+
+![RFLens Timeline](docs/screenshots/timeline.png)
 
 ## Quick Start
 
@@ -350,3 +371,4 @@ If an optional source is disabled, do not start that source service. If it is en
 - Review any public internet exposure carefully; the alpha target is local station and trusted-network use.
 - Before exposing RFLens beyond your LAN, review what the dashboard reveals: callsigns, rough or exact station location, received stations, local service names, hostnames, paths, and operational history.
 - Direwolf, readsb, tar1090, and SatDump remain the source tools. RFLens summarizes their local outputs.
+

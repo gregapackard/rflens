@@ -2,6 +2,18 @@
 
 **See what your station hears.**
 
+[![Status](https://img.shields.io/badge/status-technical%20alpha-orange)](#current-status)
+[![Release](https://img.shields.io/github/v/tag/gregapackard/rflens?label=release)](https://github.com/gregapackard/rflens/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Issues](https://img.shields.io/github/issues/gregapackard/rflens)](https://github.com/gregapackard/rflens/issues)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#first-30-minutes)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![SQLite](https://img.shields.io/badge/storage-SQLite-003B57.svg)](https://www.sqlite.org/)
+[![Local First](https://img.shields.io/badge/local--first-yes-brightgreen.svg)](#privacy-and-local-first)
+[![APRS](https://img.shields.io/badge/APRS-Direwolf-blueviolet.svg)](https://github.com/wb2osz/direwolf)
+[![ADS--B](https://img.shields.io/badge/ADS--B-readsb%20%2B%20tar1090-informational.svg)](https://github.com/wiedehopf/readsb)
+[![SatDump](https://img.shields.io/badge/satellite-SatDump-lightgrey.svg)](https://www.satdump.org/)
+
 RFLens is a local-first ham radio observability dashboard for APRS, ADS-B, and station health. It helps amateur radio operators see, measure, and improve their RF footprint using affordable hardware and open-source software.
 
 > RFLens is early alpha software. It is currently best suited for technical users comfortable with Linux, Direwolf, readsb/tar1090, and editing YAML configuration files.

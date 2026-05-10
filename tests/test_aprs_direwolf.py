@@ -6,8 +6,10 @@ import backend.db as db
 from backend.ingestors.aprs_direwolf import (
     decoded_followup_metadata,
     decoded_followup_candidate,
+    AprsIngestStats,
     enrich_packet,
     followup_boundary,
+    initial_tail_position,
     interval_due,
     packet_header_candidate,
     parse_audio_line,
@@ -53,6 +55,23 @@ class AprsDirewolfParserTests(unittest.TestCase):
     def test_status_interval_helper_throttles_chatter_updates(self):
         self.assertFalse(interval_due(100.0, 104.9, 5.0))
         self.assertTrue(interval_due(100.0, 105.0, 5.0))
+
+    def test_initial_tail_position_defaults_to_end(self):
+        self.assertEqual(initial_tail_position(12345), 12345)
+        self.assertEqual(initial_tail_position(12345, start_at_end=False), 0)
+
+    def test_perf_stats_report_is_throttled_and_low_noise(self):
+        stats = AprsIngestStats(started_at=0.0, last_report_at=0.0, lines_seen=120, packets_parsed=3)
+
+        with self.assertNoLogs("backend.ingestors.aprs_direwolf", level="INFO"):
+            stats.report_if_due(now=59.9)
+
+        with self.assertLogs("backend.ingestors.aprs_direwolf", level="INFO") as logs:
+            stats.report_if_due(now=60.0)
+
+        self.assertIn("lines_seen=120", logs.output[0])
+        self.assertIn("packets_parsed=3", logs.output[0])
+        self.assertIn("lines_per_second=2.0", logs.output[0])
 
     def test_ig_tx_without_q_construct_is_not_confirmed_gating(self):
         result = parse_gate_confirmation(

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import re
 import time
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -22,11 +24,13 @@ from backend.db import (
 )
 
 
+LOGGER = logging.getLogger(__name__)
 APRS_CALLSIGN = "KF8GBU-10"
 OWN_CALLSIGNS = {APRS_CALLSIGN}
 DUPLICATE_WINDOW_SECONDS = 60
 SOURCE_TOUCH_INTERVAL_SECONDS = 15
 STATUS_UPDATE_INTERVAL_SECONDS = 5
+PERF_REPORT_INTERVAL_SECONDS = 60
 EARTH_RADIUS_KM = 6371.0088
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,9}(?:-[0-9]{1,2})?$", re.IGNORECASE)
 POSITION_RE = re.compile(r"(\d{2})(\d{2}\.\d{2})([NS]).*?(\d{3})(\d{2}\.\d{2})([EW])")
@@ -750,17 +754,71 @@ def update_rf_metrics(total: int, callsigns: set[str], last_callsign: str | None
     )
 
 
-def follow(path: Path) -> Iterator[str]:
-    position = 0
+@dataclass
+class AprsIngestStats:
+    started_at: float
+    last_report_at: float
+    lines_seen: int = 0
+    packets_parsed: int = 0
+    audio_lines: int = 0
+    followups_attached: int = 0
+    status_lines: int = 0
+    ignored_lines: int = 0
+    db_packet_writes: int = 0
+    db_status_writes: int = 0
+
+    @classmethod
+    def start(cls) -> "AprsIngestStats":
+        now = time.time()
+        return cls(started_at=now, last_report_at=now)
+
+    def report_if_due(self, now: float | None = None) -> None:
+        current = now if now is not None else time.time()
+        elapsed = current - self.last_report_at
+        if elapsed < PERF_REPORT_INTERVAL_SECONDS:
+            return
+        lifetime = max(current - self.started_at, 0.001)
+        LOGGER.info(
+            "APRS ingest perf: lines_seen=%s packets_parsed=%s audio_lines=%s "
+            "followups_attached=%s status_lines=%s ignored_lines=%s "
+            "db_packet_writes=%s db_status_writes=%s lines_per_second=%.1f",
+            self.lines_seen,
+            self.packets_parsed,
+            self.audio_lines,
+            self.followups_attached,
+            self.status_lines,
+            self.ignored_lines,
+            self.db_packet_writes,
+            self.db_status_writes,
+            self.lines_seen / lifetime,
+        )
+        self.last_report_at = current
+
+
+def initial_tail_position(file_size: int, start_at_end: bool = True) -> int:
+    return file_size if start_at_end else 0
+
+
+def follow(path: Path, *, start_at_end: bool = True) -> Iterator[str]:
+    position: int | None = None
     inode = None
     while True:
         try:
             stat = path.stat()
-            if inode != stat.st_ino or position > stat.st_size:
+            if inode is None:
+                inode = stat.st_ino
+                position = initial_tail_position(stat.st_size, start_at_end)
+                LOGGER.info("Tailing APRS log %s from byte %s", path, position)
+            elif inode != stat.st_ino:
                 inode = stat.st_ino
                 position = 0
+                LOGGER.info("APRS log rotation detected for %s; reading new file from start", path)
+            elif position is not None and position > stat.st_size:
+                inode = stat.st_ino
+                position = 0
+                LOGGER.info("APRS log truncation detected for %s; reading from start", path)
             with path.open("r", encoding="utf-8", errors="replace") as handle:
-                handle.seek(position)
+                handle.seek(position or 0)
                 while True:
                     line = handle.readline()
                     if not line:
@@ -799,11 +857,13 @@ def run_forever() -> None:
     last_igate_update_at = 0.0
     last_audio_update_at = 0.0
     last_status_update_at = 0.0
+    stats = AprsIngestStats.start()
     reset_aprs_status(local_callsign)
     hydrated_status = hydrate_aprs_status_from_recent_events(local_callsign)
     rf_packets_heard_total = int(hydrated_status.get("rf_packets_heard_total") or 0)
 
     for line in follow(path):
+        stats.report_if_due()
         if not line:
             recent_packet = None
             last_source_touch_at = touch_source_if_due(
@@ -812,6 +872,7 @@ def run_forever() -> None:
                 last_source_touch_at,
             )
             continue
+        stats.lines_seen += 1
         prefix, text = split_prefix(line)
         if recent_packet and followup_boundary(line):
             recent_packet = None
@@ -827,11 +888,13 @@ def run_forever() -> None:
                 aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
                 fields["ignored_igate_lines"] = ignored_igate_lines
                 update_aprs_status(**fields)
+                stats.db_status_writes += 1
                 last_igate_update_at = now
             last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         audio_status = parse_audio_line(text)
         if audio_status:
+            stats.audio_lines += 1
             ignored_status_lines += 1
             now = time.time()
             level = int(audio_status["level"])
@@ -840,6 +903,7 @@ def run_forever() -> None:
             is_new_best = best_audio_level is None or level > best_audio_level
             if is_new_best or interval_due(last_audio_update_at, now):
                 update_audio_metrics(level, quality, best_audio_level, ignored_status_lines)
+                stats.db_status_writes += 1
                 last_audio_update_at = now
             if is_new_best:
                 best_audio_level = level
@@ -855,6 +919,8 @@ def run_forever() -> None:
                     lat=update_lat,
                     lon=update_lon,
                 ):
+                    stats.followups_attached += 1
+                    stats.db_packet_writes += 1
                     recent_packet["metadata"].update(metadata_updates)
                     if update_lat is not None:
                         recent_packet["metadata"]["lat"] = update_lat
@@ -870,6 +936,7 @@ def run_forever() -> None:
                         recent_packet = None
                     continue
         if status_or_help_line(text):
+            stats.status_lines += 1
             ignored_status_lines += 1
             if aprs_is_status_line(text):
                 fields = parse_igate_status(text, local_callsign)
@@ -877,21 +944,26 @@ def run_forever() -> None:
                 aprs_is_verified = bool(fields.get("aprs_is_verified", aprs_is_verified))
                 fields["ignored_status_lines"] = ignored_status_lines
                 update_aprs_status(**fields)
+                stats.db_status_writes += 1
                 last_status_update_at = time.time()
             else:
                 now = time.time()
                 if interval_due(last_status_update_at, now):
                     update_ignored_status(ignored_status_lines)
+                    stats.db_status_writes += 1
                     last_status_update_at = now
             last_source_touch_at = touch_source_if_due(source_id, "online", last_source_touch_at)
             continue
         if not packet_like(line):
+            stats.ignored_lines += 1
             recent_packet = None
             continue
         parsed = enrich_packet(line, last_audio, station_cfg, aprs_is_connected and aprs_is_verified)
         packet_line = str(parsed.get("line") or "")
         if duplicate_packet(packet_line, seen_packets, time.time()):
+            stats.ignored_lines += 1
             continue
+        stats.packets_parsed += 1
         event_id = insert_event(
             source_id=source_id,
             event_type="aprs_packet",
@@ -901,6 +973,7 @@ def run_forever() -> None:
             raw_text=line,
             metadata=parsed,
         )
+        stats.db_packet_writes += 1
         recent_packet = {
             "id": event_id,
             "metadata": dict(parsed),
@@ -913,9 +986,11 @@ def run_forever() -> None:
         if callsign:
             seen_callsigns.add(callsign)
         update_rf_metrics(rf_packets_heard_total, seen_callsigns, callsign or None, packet_timestamp)
+        stats.db_status_writes += 1
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     run_forever()
 
 

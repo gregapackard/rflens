@@ -58,6 +58,10 @@ Not yet ideal for:
 - Non-technical users.
 - Public internet exposure without review.
 
+## Alpha Testing
+
+RFLens is looking for technical alpha feedback from hams running Linux-based RF nodes. See [ALPHA_TESTING.md](ALPHA_TESTING.md) for what to test and what information to include in reports.
+
 ## Features
 
 - Local-first FastAPI dashboard.

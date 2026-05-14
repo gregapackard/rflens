@@ -156,6 +156,8 @@ RFLens is hostname-friendly. The frontend uses relative `/api/...` and `/ui/...`
 
 After the manual API run works, enable optional RF sources one at a time in `config.yaml`, rerun `scripts/check_setup.py`, and then start the matching ingestor. Treat systemd as the next step after manual startup is proven.
 
+For copy/paste examples and troubleshooting, see [Connect Local RF Sources](docs/CONNECT_LOCAL_SOURCES.md).
+
 ## Configuration
 
 Copy `config.example.yaml` to `config.yaml` and edit it for your station. The example config is safe to commit and uses placeholders. Your real `config.yaml` is local/private and is ignored by Git.
@@ -226,6 +228,8 @@ python -m backend.ingestors.satdump_watcher
 Logs from `scripts/run_all.sh` are written to `./data/logs/`.
 
 ## Optional Sources
+
+For a fresh clone, start with the full [Connect Local RF Sources](docs/CONNECT_LOCAL_SOURCES.md) guide. RFLens reads local outputs from Direwolf, readsb/tar1090, and SatDump; it does not create APRS, ADS-B, or satellite data by itself.
 
 ### APRS / Direwolf
 

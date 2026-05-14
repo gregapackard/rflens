@@ -45,3 +45,7 @@ echo "  1. Edit config.yaml for your station and enable only the sources you hav
 echo "  2. Run: ./venv/bin/python scripts/check_setup.py"
 echo "  3. Start the API: bash ./scripts/run_api.sh"
 echo "  4. Open: http://localhost:8080/ui"
+echo
+echo "Note: API-only startup shows station/system health. APRS and ADS-B remain empty"
+echo "until their sources are enabled in config.yaml and the matching ingestors are running."
+echo "See: docs/CONNECT_LOCAL_SOURCES.md"

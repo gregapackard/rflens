@@ -41,6 +41,8 @@ const HEALTH_REFRESH_MS = 5000;
 const DASHBOARD_REFRESH_MS = 30000;
 const LIVE_SECONDS = 60;
 const RECENT_SECONDS = 10 * 60;
+const APRS_EMPTY_HINT = "No APRS packets yet. Enable sources.aprs in config.yaml, point log_path at your Direwolf log, then run the APRS ingestor.";
+const ADSB_EMPTY_HINT = "No ADS-B aircraft yet. Enable sources.adsb in config.yaml, point aircraft_json_path at readsb aircraft.json, then run the ADS-B ingestor.";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1177,9 +1179,9 @@ function renderAprsTable(events) {
       </td>
     </tr>
   `).join("");
-  setHtml("aprs-table", html);
-  setHtml("aprs-tab-table", html || `<tr><td colspan="3">No APRS packets yet</td></tr>`);
-  setHtml("events-aprs-table", state.eventFilters.aprs ? html : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
+  setHtml("aprs-table", html || `<tr><td colspan="3">${esc(APRS_EMPTY_HINT)}</td></tr>`);
+  setHtml("aprs-tab-table", html || `<tr><td colspan="3">${esc(APRS_EMPTY_HINT)}</td></tr>`);
+  setHtml("events-aprs-table", state.eventFilters.aprs ? (html || `<tr><td colspan="3">${esc(APRS_EMPTY_HINT)}</td></tr>`) : `<tr><td colspan="3">APRS hidden by filter</td></tr>`);
   renderAprsStationDetail(events);
 }
 
@@ -1246,13 +1248,13 @@ function renderBriefing({ insights = {}, adsb = [], sources = [], system = {}, a
     "APRS",
     aprsPackets && aprsStations
       ? `Heard ${aprsPackets} APRS packets from ${aprsStations} stations today.`
-      : "Waiting for APRS station activity.",
+      : APRS_EMPTY_HINT,
     [direct ? `Direct RF ${direct}` : "", digipeated ? `digipeated RF ${digipeated}` : ""].filter(Boolean).join("; "),
   ));
 
   cards.push(briefingCard(
     "ADS-B",
-    adsbRange ? `ADS-B max range today: ${adsbRange}.` : `${uniqueAircraftEvents(adsb).length.toLocaleString()} aircraft in the current ADS-B sample.`,
+    adsbRange ? `ADS-B max range today: ${adsbRange}.` : (uniqueAircraftEvents(adsb).length ? `${uniqueAircraftEvents(adsb).length.toLocaleString()} aircraft in the current ADS-B sample.` : ADSB_EMPTY_HINT),
     [
       operator ? `Top operator: ${operator[0]} (${adsbCountLabel(operator[1], "record")})` : "",
       adsbAltitude ? `highest ${adsbAltitude}` : "",
@@ -1302,11 +1304,11 @@ function renderInsights(insights = {}, adsb = [], sources = [], system = {}, apr
 
   const aprsLines = insights.aprs?.plain_english || [];
   const adsbLines = [
-    ...adsbObservationLines(adsb, insights),
+    ...(adsb.length ? adsbObservationLines(adsb, insights) : []),
     ...(insights.adsb?.plain_english || []),
   ];
-  setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 4).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No APRS insights yet.</p>");
-  setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 6).map((line) => `<p>${esc(line)}</p>`).join("") : "<p>No ADS-B receiver insights yet.</p>");
+  setHtml("insights-aprs-list", aprsLines.length ? aprsLines.slice(0, 4).map((line) => `<p>${esc(line)}</p>`).join("") : `<p>${esc(APRS_EMPTY_HINT)}</p>`);
+  setHtml("insights-adsb-list", adsbLines.length ? adsbLines.slice(0, 6).map((line) => `<p>${esc(line)}</p>`).join("") : `<p>${esc(ADSB_EMPTY_HINT)}</p>`);
 }
 
 function renderDonut(targetId, values) {
@@ -1344,7 +1346,7 @@ function renderHourBars(targetId, events) {
   });
   const max = Math.max(...buckets);
   if (!max) {
-    setHtml(targetId, "No APRS activity in the current fetched sample yet.");
+    setHtml(targetId, APRS_EMPTY_HINT);
     return;
   }
   setHtml(targetId, buckets.map((count, hour) => `
@@ -1417,11 +1419,11 @@ function adsbAltitudeBuckets(adsb) {
 }
 
 function renderRangeBuckets(targetId, adsb) {
-  renderBucketRows(targetId, adsbRangeBuckets(adsb), "No ranged aircraft in the current ADS-B sample yet.");
+  renderBucketRows(targetId, adsbRangeBuckets(adsb), ADSB_EMPTY_HINT);
 }
 
 function renderAltitudeBuckets(targetId, adsb) {
-  renderBucketRows(targetId, adsbAltitudeBuckets(adsb), "No aircraft altitudes in the current ADS-B sample yet.");
+  renderBucketRows(targetId, adsbAltitudeBuckets(adsb), ADSB_EMPTY_HINT);
 }
 
 function topBucketLabel(buckets) {
@@ -1540,8 +1542,8 @@ function renderAdsbTable(events) {
       <td>${esc(event.speed ?? "-")}</td>
     </tr>
   `).join("");
-  setHtml("adsb-table", html);
-  setHtml("events-adsb-table", state.eventFilters.adsb ? html : `<tr><td colspan="5">ADS-B hidden by filter</td></tr>`);
+  setHtml("adsb-table", html || `<tr><td colspan="5">${esc(ADSB_EMPTY_HINT)}</td></tr>`);
+  setHtml("events-adsb-table", state.eventFilters.adsb ? (html || `<tr><td colspan="5">${esc(ADSB_EMPTY_HINT)}</td></tr>`) : `<tr><td colspan="5">ADS-B hidden by filter</td></tr>`);
 }
 
 function shortPath(path) {

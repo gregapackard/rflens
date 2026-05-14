@@ -353,6 +353,12 @@ Run the setup check:
 ./venv/bin/python scripts/check_setup.py
 ```
 
+For a local source status report after the UI loads, run:
+
+```bash
+./venv/bin/python scripts/source_doctor.py
+```
+
 Common checks:
 
 ```bash

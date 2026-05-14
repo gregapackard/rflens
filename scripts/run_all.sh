@@ -86,3 +86,5 @@ fi
 
 echo "RFLens is running on ${HOST}:${PORT}; open http://localhost:${PORT}/ui or your node hostname."
 echo "Logs are in ./data/logs/"
+echo "Check status: bash ./scripts/status.sh"
+echo "Stop manual processes: bash ./scripts/stop_all.sh"

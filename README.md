@@ -215,7 +215,16 @@ Run enabled sources with the helper:
 bash ./scripts/run_all.sh
 ```
 
-`run_all.sh` starts the API and only the ingestors whose `sources.<name>.enabled` value is `true`.
+`run_all.sh` is for manual/local background runs. It starts the API and only the ingestors whose `sources.<name>.enabled` value is `true`.
+
+Check or stop manual background processes:
+
+```bash
+bash ./scripts/status.sh
+bash ./scripts/stop_all.sh
+```
+
+`status.sh` reports what appears to be running from this repo and shows recent `./data/logs/` files. `stop_all.sh` sends SIGTERM only to manual RFLens processes whose working directory is this repo. systemd users should use `systemctl status`, `systemctl stop`, and the service names instead.
 
 Or run ingestors directly:
 

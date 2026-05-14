@@ -78,6 +78,19 @@ def enabled_text(source: dict[str, Any]) -> str:
     return "enabled" if source.get("enabled") else "disabled"
 
 
+def first_configured(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def placeholder_callsign(value: str) -> bool:
+    normalized = value.strip().upper()
+    return normalized in {"N0CALL", "NOCALL"} or normalized.startswith("N0CALL-") or normalized.startswith("NOCALL-")
+
+
 def main() -> int:
     suggestions: list[str] = []
 
@@ -108,18 +121,24 @@ def main() -> int:
     if not reachable:
         suggestions.append("Start the API with bash ./scripts/run_api.sh, then rerun this script.")
 
-    station = cfg.get("station", {}) or {}
-    station_callsign = str(station.get("callsign") or "").strip()
-    aprs_callsign = str(station.get("aprs_callsign") or "").strip()
-    line("station callsign", station_callsign or "missing")
-    line("APRS callsign", aprs_callsign or "missing")
-    placeholder = station_callsign.upper() == "N0CALL" or aprs_callsign.upper().startswith("N0CALL")
-    line("N0CALL placeholder present", bool_text(placeholder))
-    if placeholder:
-        suggestions.append("Replace N0CALL placeholders in config.yaml with your station callsign.")
-
     sources = cfg.get("sources", {}) or {}
     aprs = sources.get("aprs", {}) or {}
+    station = cfg.get("station", {}) or {}
+    station_callsign = str(station.get("callsign") or "").strip()
+    aprs_callsign = first_configured(
+        aprs.get("callsign"),
+        aprs.get("igate_callsign"),
+        station.get("aprs_callsign"),
+        station.get("callsign"),
+        "NOCALL",
+    )
+    line("station callsign", station_callsign or "missing")
+    line("effective APRS callsign", aprs_callsign)
+    placeholder = placeholder_callsign(station_callsign) or placeholder_callsign(aprs_callsign)
+    line("N0CALL/NOCALL placeholder present", bool_text(placeholder))
+    if placeholder:
+        suggestions.append("Replace N0CALL/NOCALL placeholders in config.yaml with your station callsign.")
+
     line("APRS source", enabled_text(aprs))
     aprs_log, aprs_log_exists = path_status(aprs.get("log_path"))
     line("APRS log path", f"{aprs_log or 'missing'} ({'exists' if aprs_log_exists else 'missing'})")

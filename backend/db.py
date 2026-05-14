@@ -1338,6 +1338,44 @@ def aprs_gate_stats(events_with_metadata: list[tuple[dict[str, Any], dict[str, A
     }
 
 
+def aprs_igate_status(gate_stats: dict[str, Any], local_callsign: str) -> dict[str, Any]:
+    rf_heard_today = int(gate_stats.get("heard_over_rf") or 0) > 0
+    gate_eligible_heard_today = int(gate_stats.get("gate_eligible") or 0) > 0
+    aprs_is_qpath_proof_today = int(gate_stats.get("gate_confirmed") or 0) > 0
+    likely_gated_today = aprs_is_qpath_proof_today or (rf_heard_today and gate_eligible_heard_today)
+    proof_detail = f"Strict APRS-IS proof requires qAR/qAO/qAS,{local_callsign} in a captured APRS-IS packet."
+
+    if aprs_is_qpath_proof_today:
+        status_level = "ok_confirmed"
+        status_message = f"Confirmed: RF Lens captured APRS-IS proof that {local_callsign} gated packets today."
+        proof_detail_value = None
+    elif rf_heard_today and gate_eligible_heard_today:
+        status_level = "ok_likely"
+        status_message = (
+            f"RF Lens heard gate-eligible APRS packets today. {local_callsign} appears active, "
+            "but local APRS-IS q-path proof has not been captured yet."
+        )
+        proof_detail_value = proof_detail
+    elif rf_heard_today:
+        status_level = "warn_rf_only"
+        status_message = "APRS RF packets were heard today, but no gate-eligible packets have been detected yet."
+        proof_detail_value = proof_detail
+    else:
+        status_level = "warn_no_rf"
+        status_message = "No APRS RF packets heard today."
+        proof_detail_value = proof_detail
+
+    return {
+        "rf_heard_today": rf_heard_today,
+        "gate_eligible_heard_today": gate_eligible_heard_today,
+        "likely_gated_today": likely_gated_today,
+        "aprs_is_qpath_proof_today": aprs_is_qpath_proof_today,
+        "aprs_is_qpath_proof_detail": proof_detail_value,
+        "status_level": status_level,
+        "status_message": status_message,
+    }
+
+
 def aprs_category_stats(events_with_metadata: list[tuple[dict[str, Any], dict[str, Any]]]) -> dict[str, int]:
     counts = {"direct_rf": 0, "digipeated_rf": 0, "aprs_is": 0, "unknown": 0}
     for _event, metadata in events_with_metadata:
@@ -1542,6 +1580,7 @@ def fetch_insights() -> dict[str, Any]:
     adsb_today_with_metadata = [(event, parse_metadata_payload(event.get("metadata_json"))) for event in adsb_today]
     gate_stats = aprs_gate_stats(aprs_with_metadata)
     gate_stats_today = aprs_gate_stats(aprs_today_with_metadata)
+    igate_status_today = aprs_igate_status(gate_stats_today, local_callsign)
     category_stats = aprs_category_stats(aprs_with_metadata)
     category_stats_today = aprs_category_stats(aprs_today_with_metadata)
 
@@ -1605,7 +1644,7 @@ def fetch_insights() -> dict[str, Any]:
     network_sentence = aprs_range_sentence(farthest_network, "Network-side APRS", network_side=True)
     audio_sentence = aprs_audio_sentence(best_audio)
     gate_notice = (
-        f"You are hearing RF packets, but RFLens has not confirmed a packet accepted by APRS-IS as gated by {local_callsign}."
+        aprs_igate_status(gate_stats, local_callsign)["status_message"]
         if gate_stats["gate_eligible"] and gate_stats["gate_confirmed"] == 0
         else None
     )
@@ -1673,11 +1712,8 @@ def fetch_insights() -> dict[str, Any]:
             "gate_confirmed_today": gate_stats_today["gate_confirmed"],
             "confirmed_gated_by_local_today": gate_stats_today["confirmed_gated_by_local"],
             "gate_unconfirmed_today": max(gate_stats_today["gate_eligible"] - gate_stats_today["gate_confirmed"], 0),
-            "gate_notice_today": (
-                f"RF heard and gate eligible, but no APRS-IS path proof confirms {local_callsign} gated a packet today."
-                if gate_stats_today["gate_eligible"] and gate_stats_today["gate_confirmed"] == 0
-                else None
-            ),
+            "gate_notice_today": igate_status_today["status_message"],
+            **igate_status_today,
             "gate_competition_note_today": gate_stats_today["language"] if gate_stats_today["likely_competing_igates_or_digipeaters"] else None,
             "adsb_max_range_today": format_distance_nmi(adsb_range_today),
             "adsb_highest_altitude_today": format_feet(adsb_altitude_today),
@@ -1714,6 +1750,7 @@ def fetch_insights() -> dict[str, Any]:
             },
             "gate": {
                 **gate_stats,
+                **aprs_igate_status(gate_stats, local_callsign),
                 "gate_unconfirmed": max(gate_stats["gate_eligible"] - gate_stats["gate_confirmed"], 0),
                 "notice": gate_notice,
                 "local_callsign": local_callsign,

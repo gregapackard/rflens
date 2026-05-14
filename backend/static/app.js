@@ -1193,11 +1193,12 @@ function cleanBriefingValue(value) {
 }
 
 function briefingCard(category, title, detail = "") {
+  const details = Array.isArray(detail) ? detail.filter(Boolean) : (detail ? [detail] : []);
   return `
     <article class="briefing-card">
       <span>${esc(category)}</span>
       <strong>${esc(title)}</strong>
-      ${detail ? `<p>${esc(detail)}</p>` : ""}
+      ${details.length ? `<p>${details.map((line) => esc(line)).join("<br>")}</p>` : ""}
     </article>
   `;
 }
@@ -1230,7 +1231,9 @@ function renderBriefing({ insights = {}, adsb = [], sources = [], system = {}, a
   const adsbAltitude = cleanBriefingValue(daily.adsb_highest_altitude_today);
   const adsbSignal = cleanBriefingValue(daily.adsb_strongest_signal_today);
   const confirmedGate = Number(daily.confirmed_gated_by_local_today ?? daily.gate_confirmed_today);
-  const gateNotice = cleanBriefingValue(daily.gate_notice_today || insights.aprs?.gate?.notice);
+  const gateStatus = insights.aprs?.gate || {};
+  const gateMessage = cleanBriefingValue(daily.status_message || gateStatus.status_message || daily.gate_notice_today || gateStatus.notice);
+  const gateDetail = cleanBriefingValue(daily.aprs_is_qpath_proof_detail || gateStatus.aprs_is_qpath_proof_detail);
   const cards = [];
 
   cards.push(briefingCard(
@@ -1259,10 +1262,16 @@ function renderBriefing({ insights = {}, adsb = [], sources = [], system = {}, a
 
   cards.push(briefingCard(
     "iGate",
-    Number.isFinite(confirmedGate) && confirmedGate > 0
+    gateMessage || (Number.isFinite(confirmedGate) && confirmedGate > 0
       ? `${confirmedGate.toLocaleString()} packet${confirmedGate === 1 ? "" : "s"} confirmed gated by local station today.`
-      : `No APRS-IS proof yet that ${aprsStatus.callsign || "this station"} gated a packet today.`,
-    gateNotice,
+      : "No APRS RF packets heard today."),
+    [
+      `RF heard today: ${yesNo(daily.rf_heard_today)}`,
+      `Gate-eligible packets heard: ${yesNo(daily.gate_eligible_heard_today)}`,
+      `Likely gated today: ${yesNo(daily.likely_gated_today)}`,
+      `APRS-IS q-path proof: ${daily.aprs_is_qpath_proof_today ? "Confirmed" : "Not captured"}`,
+      gateDetail,
+    ],
   ));
 
   cards.push(briefingCard(
@@ -1590,10 +1599,6 @@ function renderAdsbCard(adsb) {
   setMany(["dash-adsb-updated", "overview-adsb-updated"], lastUpdate ? relTime(lastUpdate) : "No data yet");
 }
 
-function yesNo(value) {
-  return value === true ? "yes" : "no";
-}
-
 function hasValue(value) {
   return value !== null && value !== undefined && value !== "";
 }
@@ -1829,9 +1834,9 @@ function renderStationProfile({ station, sources, aprsStatus, insights, system }
   const callsign = aprsStatus?.callsign || "No data yet";
   const confirmedGated = Number(daily.confirmed_gated_by_local_today ?? daily.gate_confirmed_today);
   const gateEligible = Number(daily.gate_eligible_today);
-  const gateNote = Number.isFinite(confirmedGated) && confirmedGated > 0
+  const gateNote = daily.status_message || (Number.isFinite(confirmedGated) && confirmedGated > 0
     ? `${confirmedGated.toLocaleString()} packet${confirmedGated === 1 ? "" : "s"} confirmed by APRS-IS path proof today.`
-    : "No APRS-IS proof yet that this station gated a packet today.";
+    : "No APRS RF packets heard today.");
 
   setText("profile-station-name", stationName);
   setText("profile-station-subtitle", `${station?.grid || "Local RF node"} - See what your station hears.`);

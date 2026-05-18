@@ -798,6 +798,26 @@ dd {
   color: var(--text);
 }
 
+.search-input {
+  border: 1px solid rgba(37, 50, 65, 0.9);
+  border-radius: 8px;
+  padding: 0.38rem 0.65rem;
+  background: rgba(11, 15, 20, 0.78);
+  color: var(--text);
+  font-size: 0.85rem;
+  min-width: 180px;
+}
+
+.search-input::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent, #3b82f6);
+}
+
 .station-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
